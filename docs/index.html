@@ -146,12 +146,19 @@
             <button id="testConnectionBtn" class="pill">Test connection</button>
             <button id="runSetupBtn" class="pill primary">Run setup</button>
           </div>
+          <p id="setupStatus" class="hint" style="margin-top:8px"></p>
         </section>
 
         <section class="settingSection">
-          <h3>Gemini API Key</h3>
-          <p class="hint">Used for AI aisle-order sorting. Stored in your browser only.</p>
-          <input id="geminiKeyInput" type="password" placeholder="AIza…" class="fullInput">
+          <h3>Claude API Key</h3>
+          <p class="hint">
+            Used for AI aisle-order sorting. Stored securely in Google Apps Script —
+            never in your browser. Get a key at
+            <a href="https://console.anthropic.com/settings/keys" target="_blank">console.anthropic.com</a>.
+          </p>
+          <p id="claudeKeyStatus" class="hint" style="font-weight:600"></p>
+          <input id="claudeKeyInput" type="password" placeholder="sk-ant-…" class="fullInput">
+          <p class="hint" style="margin-top:4px">Enter key and tap Save settings to store it.</p>
         </section>
 
         <section class="settingSection">

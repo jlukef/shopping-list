@@ -2,8 +2,8 @@
    Shopping List — Frontend Application
    Talks to a Google Apps Script web app (all via GET to avoid
    CORS issues with Apps Script's redirect behaviour).
-   AI sorting calls Gemini directly from the browser so the
-   API key never leaves the device (stored in localStorage).
+   AI sorting (Claude) runs server-side in Apps Script —
+   the API key is stored in Script Properties, never in the browser.
 ============================================================ */
 
 'use strict';
@@ -11,10 +11,8 @@
 // ── Config (persisted in localStorage) ──────────────────────
 const CFG = {
   get scriptUrl()   { return localStorage.getItem('scriptUrl')   || ''; },
-  get geminiKey()   { return localStorage.getItem('geminiKey')   || ''; },
   get defaultShop() { return localStorage.getItem('defaultShop') || 'tesco'; },
   set scriptUrl(v)  { localStorage.setItem('scriptUrl',   v); },
-  set geminiKey(v)  { localStorage.setItem('geminiKey',   v); },
   set defaultShop(v){ localStorage.setItem('defaultShop', v); },
 };
 
@@ -408,7 +406,7 @@ async function removeShop(id) {
 }
 
 // ════════════════════════════════════════════════════════════
-// AI Sorting
+// AI Sorting — via Claude (server-side in Apps Script)
 // ════════════════════════════════════════════════════════════
 function openSortModal() {
   const shops = STATE.shops.filter(s =>
@@ -450,86 +448,31 @@ async function doSort(shopId) {
   if (!items.length) { toast('No unbought items for this shop', 'warn'); return; }
 
   const shop = STATE.shops.find(s => s.id === shopId);
-  toast(`🤖 Sorting for ${shop ? shop.name : shopId}…`);
+  toast(`🤖 Asking Claude to sort ${shop ? shop.name : shopId}…`);
 
-  // Ensure layout is loaded
-  if (!STATE.layouts[shopId]) await loadLayouts(shopId);
-  const layouts = STATE.layouts[shopId] || [];
+  // Send to Apps Script — Claude runs server-side with the stored API key
+  const res = await api('sortList', {
+    items: items.map(i => ({ id: i.id, item: i.item })),
+    shop:  shopId
+  });
 
-  // Try Gemini client-side first
-  if (CFG.geminiKey) {
-    const sorted = await sortWithGemini(items, shopId, layouts);
-    if (sorted) { applySortOrder(sorted); return; }
-  }
+  if (!res) return;
 
-  // Fallback: keyword-based sort
-  const sorted = sortByKeywords(items, layouts);
-  applySortOrder(sorted);
-  toast('Sorted by aisle keywords (no AI key set)');
+  const method = res.method || 'unknown';
+  applySortOrder(res.items || []);
+
+  if (method === 'claude')   toast('✅ Sorted by Claude AI!', 'success');
+  else if (method === 'keywords') toast('Sorted by aisle keywords (add Claude key in Settings for AI)', 'info');
+  else toast('✅ Sorted!', 'success');
 }
 
 function applySortOrder(sortedItems) {
   sortedItems.forEach((item, idx) => {
     const found = STATE.items.find(i => i.id === item.id);
     if (found) found.sortOrder = idx;
-    // Persist async (fire-and-forget)
-    api('updateItem', { id: item.id, sortOrder: idx });
+    api('updateItem', { id: item.id, sortOrder: idx }); // persist async
   });
   renderShoppingList();
-  toast('✅ List sorted!', 'success');
-}
-
-async function sortWithGemini(items, shopId, layouts) {
-  if (!layouts.length) return null;
-  const deptOrder = layouts.map(l => `${l.order}. ${l.department}`).join('\n');
-  const prompt =
-    `Sort this UK supermarket shopping list in the exact order a customer would ` +
-    `encounter the items walking from entrance to checkout in ${shopId}.\n\n` +
-    `Store aisle order:\n${deptOrder}\n\n` +
-    `Items:\n${items.map(i => `${i.id}: ${i.item}`).join('\n')}\n\n` +
-    `Return ONLY valid JSON: {"sortedIds": ["id1", "id2", ...]}`;
-
-  try {
-    const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent?key=${CFG.geminiKey}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: { temperature: 0, responseMimeType: 'application/json' }
-        })
-      }
-    );
-    if (!res.ok) throw new Error(`Gemini HTTP ${res.status}`);
-    const data      = await res.json();
-    const text      = data.candidates[0].content.parts[0].text;
-    const sortedIds = JSON.parse(text).sortedIds;
-    const byId      = Object.fromEntries(items.map(i => [i.id, i]));
-    return sortedIds.filter(id => byId[id]).map(id => byId[id]);
-  } catch (e) {
-    toast('AI sort failed, falling back to keywords: ' + e.message, 'warn');
-    return null;
-  }
-}
-
-function sortByKeywords(items, layouts) {
-  const kwOrder = {};
-  layouts.forEach(dept => {
-    String(dept.keywords).split(',').forEach(kw => {
-      kw = kw.trim().toLowerCase();
-      if (kw && kwOrder[kw] === undefined) kwOrder[kw] = Number(dept.order);
-    });
-  });
-  function rank(name) {
-    const n = name.toLowerCase();
-    if (kwOrder[n] !== undefined) return kwOrder[n];
-    for (const [kw, ord] of Object.entries(kwOrder)) {
-      if (n.includes(kw) || kw.includes(n)) return ord;
-    }
-    return 999;
-  }
-  return [...items].sort((a, b) => rank(a.item) - rank(b.item));
 }
 
 // ════════════════════════════════════════════════════════════
@@ -621,10 +564,20 @@ function highlightAc(items) {
 // ════════════════════════════════════════════════════════════
 // Settings modal
 // ════════════════════════════════════════════════════════════
-function openSettings() {
-  $('scriptUrlInput').value  = CFG.scriptUrl;
-  $('geminiKeyInput').value  = CFG.geminiKey;
+async function openSettings() {
+  $('scriptUrlInput').value    = CFG.scriptUrl;
   $('defaultShopSelect').value = CFG.defaultShop;
+  $('claudeKeyInput').value    = '';  // never pre-fill a key field
+  // Show whether a key is already stored server-side
+  $('claudeKeyStatus').textContent = '';
+  if (CFG.scriptUrl) {
+    const res = await apiQ('getApiKeySet');
+    if (res) {
+      $('claudeKeyStatus').textContent = res.set
+        ? `✅ Key set (${res.preview})`
+        : '⚠️ No key saved yet';
+    }
+  }
   $('settingsModal').classList.remove('hidden');
 }
 
@@ -632,12 +585,23 @@ function closeSettings() {
   $('settingsModal').classList.add('hidden');
 }
 
-function saveSettings() {
-  CFG.scriptUrl   = $('scriptUrlInput').value.trim();
-  CFG.geminiKey   = $('geminiKeyInput').value.trim();
+async function saveSettings() {
+  const url = $('scriptUrlInput').value.trim();
+  CFG.scriptUrl   = url;
   CFG.defaultShop = $('defaultShopSelect').value;
-  toast('Settings saved ✓', 'success');
+
+  // Save Claude API key to Script Properties if one was entered
+  const claudeKey = $('claudeKeyInput').value.trim();
+  if (claudeKey && url) {
+    const keyRes = await api('saveApiKey', { claudeKey });
+    if (keyRes) {
+      $('claudeKeyStatus').textContent = '✅ Key saved to server';
+      $('claudeKeyInput').value = '';
+    }
+  }
+
   closeSettings();
+  toast('Settings saved ✓', 'success');
   if (CFG.scriptUrl) loadAll();
 }
 
@@ -648,15 +612,25 @@ async function testConnection() {
   CFG.scriptUrl = url;
   const res = await api('getShops');
   CFG.scriptUrl = old;
-  if (res) toast('✅ Connection successful!', 'success');
+  if (res) toast(`✅ Connected — ${res.shops.length} shop(s) found`, 'success');
 }
 
 async function runSetup() {
   const url = $('scriptUrlInput').value.trim();
   if (!url) { toast('Enter a URL first', 'warn'); return; }
-  CFG.scriptUrl = url;
+  const btn = $('runSetupBtn');
+  btn.disabled    = true;
+  btn.textContent = 'Setting up…';
+  CFG.scriptUrl   = url;
   const res = await api('setup');
-  if (res) { toast('✅ Setup complete!', 'success'); loadAll(); }
+  btn.disabled    = false;
+  btn.textContent = 'Run setup';
+  if (res) {
+    // Show feedback inside the modal (toast is hidden behind backdrop)
+    $('setupStatus').textContent = '✅ Setup complete! Shops and layouts ready.';
+    $('setupStatus').style.color = '#2e7d32';
+    loadAll();
+  }
 }
 
 // ── Layout editor ─────────────────────────────────────────────
@@ -725,7 +699,6 @@ function wire() {
 
   // Header buttons
   $('refreshBtn').addEventListener('click', loadAll);
-  $('settingsBtn').addEventListener('click', openSettings);
 
   // Add item
   $('addBtn').addEventListener('click', addItemToList);
@@ -751,6 +724,7 @@ function wire() {
   });
 
   // Settings modal
+  $('settingsBtn').addEventListener('click', openSettings);
   $('closeSettings').addEventListener('click', closeSettings);
   $('modalBackdrop').addEventListener('click', closeSettings);
   $('testConnectionBtn').addEventListener('click', testConnection);

@@ -42,6 +42,8 @@ function doGet(e) {
       case 'getLayouts':     return ok(getLayouts(shop));
       case 'saveLayout':     return ok(saveLayout(data));
       case 'sortList':       return ok(sortListAI(data));
+      case 'saveApiKey':     return ok(saveApiKey(data));
+      case 'getApiKeySet':   return ok(getApiKeySet());
       default:               return ok({ error: 'Unknown action: ' + action });
     }
   } catch (err) {
@@ -344,54 +346,85 @@ function addToHistory(itemRow) {
   ]);
 }
 
-// ── AI Sorting (server-side fallback) ────────────────────────
-// Preferred: AI sort runs client-side in the browser.
-// This function is called if the client sends a sortList action
-// with a geminiKey included (it reads it from Script Properties
-// if not supplied, so the key can be kept off the client entirely).
+// ── Claude API key management ─────────────────────────────────
+// The key is stored in Script Properties (server-side only).
+// It never appears in the frontend source or localStorage.
+function saveApiKey(data) {
+  if (!data.claudeKey) return { error: 'No key provided' };
+  PropertiesService.getScriptProperties().setProperty('CLAUDE_API_KEY', data.claudeKey.trim());
+  return { success: true };
+}
+
+function getApiKeySet() {
+  const key = PropertiesService.getScriptProperties().getProperty('CLAUDE_API_KEY') || '';
+  // Return only whether a key is set, not the key itself
+  return { set: key.length > 0, preview: key.length > 4 ? key.substring(0, 4) + '…' : '' };
+}
+
+// ── AI Sorting via Claude ─────────────────────────────────────
+// All sorting happens server-side so the API key stays off the client.
 function sortListAI(data) {
   const items  = data.items  || [];
   const shopId = data.shop   || '';
-  const key    = data.geminiKey
-              || PropertiesService.getScriptProperties().getProperty('GEMINI_API_KEY')
-              || '';
-
+  const key    = PropertiesService.getScriptProperties().getProperty('CLAUDE_API_KEY') || '';
   const layouts = getLayouts(shopId).layouts;
 
-  if (!key || !layouts.length) {
+  if (!layouts.length) {
+    return { items, method: 'unchanged', message: 'No store layout found for ' + shopId };
+  }
+
+  if (!key) {
+    // No API key — fall back to keyword sorting
     return sortByKeywords(items, layouts);
   }
 
+  const shopName = shopId.charAt(0).toUpperCase() + shopId.slice(1);
   const deptOrder = layouts.map(l => `${l.order}. ${l.department}`).join('\n');
 
   const prompt =
-    `Sort this shopping list in the order a customer would encounter the items ` +
-    `walking through a ${shopId} supermarket from entrance to checkout.\n\n` +
-    `Store layout:\n${deptOrder}\n\n` +
-    `Items:\n${items.map(i => `${i.id}: ${i.item}`).join('\n')}\n\n` +
-    `Return JSON only: {"sortedIds": ["id1", "id2", ...]}`;
+    `You are helping sort a UK supermarket shopping list into the order a customer ` +
+    `would encounter the items walking from the entrance to the checkout at ${shopName}.\n\n` +
+    `Store aisle order:\n${deptOrder}\n\n` +
+    `Items to sort:\n${items.map(i => `${i.id}: ${i.item}`).join('\n')}\n\n` +
+    `Return ONLY a JSON object — no explanation, no markdown:\n{"sortedIds": ["id1", "id2", ...]}`;
 
   try {
-    const resp = UrlFetchApp.fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent?key=${key}`,
-      {
-        method: 'post',
-        contentType: 'application/json',
-        payload: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: { temperature: 0, responseMimeType: 'application/json' }
-        })
-      }
-    );
-    const result     = JSON.parse(resp.getContentText());
-    const sortedIds  = JSON.parse(result.candidates[0].content.parts[0].text).sortedIds;
+    const resp = UrlFetchApp.fetch('https://api.anthropic.com/v1/messages', {
+      method: 'post',
+      headers: {
+        'x-api-key':         key,
+        'anthropic-version': '2023-06-01',
+        'content-type':      'application/json'
+      },
+      payload: JSON.stringify({
+        model:      'claude-haiku-4-5-20251001',
+        max_tokens: 1024,
+        messages:   [{ role: 'user', content: prompt }]
+      }),
+      muteHttpExceptions: true
+    });
+
+    const httpCode = resp.getResponseCode();
+    if (httpCode !== 200) {
+      Logger.log('Claude API error ' + httpCode + ': ' + resp.getContentText());
+      return sortByKeywords(items, layouts);
+    }
+
+    const result    = JSON.parse(resp.getContentText());
+    const rawText   = result.content[0].text.trim();
+    // Strip any accidental markdown fences
+    const jsonText  = rawText.replace(/^```[a-z]*\n?/i, '').replace(/\n?```$/,'');
+    const sortedIds = JSON.parse(jsonText).sortedIds;
 
     const byId = {};
     items.forEach(i => byId[i.id] = i);
-    const sorted = sortedIds.filter(id => byId[id]).map((id, idx) => ({ ...byId[id], sortOrder: idx }));
-    const unsorted = items.filter(i => !new Set(sortedIds).has(i.id));
-    return { items: [...sorted, ...unsorted], method: 'ai' };
+    const sorted   = sortedIds.filter(id => byId[id]).map((id, idx) => ({ ...byId[id], sortOrder: idx }));
+    const included = new Set(sortedIds);
+    const unsorted = items.filter(i => !included.has(i.id));
+    return { items: [...sorted, ...unsorted], method: 'claude' };
+
   } catch (err) {
+    Logger.log('Sort error: ' + err.message);
     return sortByKeywords(items, layouts);
   }
 }
