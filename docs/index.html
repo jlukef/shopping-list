@@ -41,58 +41,21 @@
   ══════════════════════════════════════════════════════════ -->
   <div id="createTab" class="tabContent active">
 
-    <!-- Add-item form -->
-    <div class="addCard">
-      <div class="inputRow">
-        <div class="autocompleteWrap">
-          <input id="itemInput" type="text" placeholder="Add item…" autocomplete="off" autocorrect="off" spellcheck="false">
-          <ul id="autocompleteList" class="autocompleteList hidden"></ul>
-        </div>
-        <button id="addBtn" class="addBtn">＋</button>
-      </div>
-
-      <div class="detailRow">
-        <input id="qtyInput" type="number" value="1" min="0.5" step="0.5" class="qtyInput">
-        <select id="unitSelect" class="unitSelect">
-          <option value="">—</option>
-          <option value="g">g</option>
-          <option value="kg">kg</option>
-          <option value="ml">ml</option>
-          <option value="L">L</option>
-          <option value="pack">pack</option>
-          <option value="tin">tin</option>
-          <option value="bottle">bottle</option>
-          <option value="bag">bag</option>
-          <option value="box">box</option>
-          <option value="bunch">bunch</option>
-          <option value="jar">jar</option>
-          <option value="tub">tub</option>
-          <option value="slice">slice</option>
-          <option value="loaf">loaf</option>
-          <option value="head">head</option>
-          <option value="clove">clove</option>
-          <option value="tbsp">tbsp</option>
-          <option value="tsp">tsp</option>
-        </select>
-        <select id="shopSelect" class="shopSelect"></select>
-      </div>
-
-      <div class="notesRow">
-        <input id="notesInput" type="text" placeholder="Notes (optional)…" class="notesInput">
-      </div>
-    </div>
-
-    <!-- Current list items -->
-    <div id="createListContainer">
-      <div class="listHeader">
+    <!-- Shop toggle chips + meta bar -->
+    <div class="createHeader">
+      <div id="shopToggles" class="shopToggles"></div>
+      <div class="createMeta">
         <span id="createCount" class="listCount">0 items</span>
         <button id="clearListBtn" class="dangerLinkBtn">Clear all</button>
       </div>
-      <ul id="createList" class="itemList"></ul>
-      <div id="emptyCreate" class="emptyState">
-        <div class="emptyIcon">🛒</div>
-        <p>Your list is empty.<br>Add something above!</p>
-      </div>
+    </div>
+
+    <!-- Per-shop columns, rendered by JS -->
+    <div id="createSections" class="createSections"></div>
+
+    <div id="emptyCreate" class="emptyState hidden">
+      <div class="emptyIcon">🛒</div>
+      <p>Enable a shop above to start adding items.</p>
     </div>
   </div>
 

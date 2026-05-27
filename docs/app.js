@@ -18,13 +18,17 @@ const CFG = {
 
 // ── Application state ────────────────────────────────────────
 const STATE = {
-  items:          [],   // full list from API
-  shops:          [],   // shop objects {id,name,color,emoji}
-  layouts:        {},   // { shopId: [{shop,department,order,keywords}] }
-  activeShopFilter: null,   // shopId or null = all
-  acTimeout:      null,
-  acSelected:     -1,
-  loading:        false,
+  items:              [],    // full list from API
+  shops:              [],    // shop objects {id,name,color,emoji}
+  layouts:            {},    // { shopId: [{shop,department,order,keywords}] }
+  enabledShops:       [],    // shop IDs shown in create tab
+  activeShopFilter:   null,  // shopping tab filter
+  activeAddShop:      null,  // which shop's add row is currently open
+  activeAddInputValue:'',    // preserved across re-renders
+  acTimeout:          null,
+  acSelected:         -1,
+  acShop:             null,  // which shop's autocomplete is open
+  loading:            false,
 };
 
 // ── DOM refs ─────────────────────────────────────────────────
@@ -81,11 +85,23 @@ async function loadAll() {
   setLoading(false);
   if (listRes)  STATE.items = listRes.items || [];
   if (shopsRes) STATE.shops = shopsRes.shops || [];
+
+  // Set default enabled shops (first 3) if nothing saved yet
+  if (!STATE.enabledShops.length && STATE.shops.length) {
+    const saved = localStorage.getItem('createEnabledShops');
+    if (saved) {
+      try { STATE.enabledShops = JSON.parse(saved); } catch (e) {}
+    }
+    if (!STATE.enabledShops.length) {
+      STATE.enabledShops = STATE.shops.slice(0, 3).map(s => s.id);
+    }
+  }
+
   renderAll();
 }
 
 async function loadLayouts(shopId) {
-  const res = await api('getLayouts', {}, { shop: shopId });
+  const res = await apiQ('getLayouts', { shop: shopId });
   if (res) STATE.layouts[shopId] = res.layouts || [];
   return STATE.layouts[shopId] || [];
 }
@@ -111,37 +127,32 @@ async function apiQ(action, queryExtra = {}) {
 // Render
 // ════════════════════════════════════════════════════════════
 function renderAll() {
-  renderShopSelects();
-  renderCreateList();
+  renderSettingSelects();
+  renderCreateTab();
   renderShoppingList();
   renderSettingsShops();
   renderShopFilterChips();
 }
 
-/* ── Shop selects & chips ─────────────────────────────────── */
-function renderShopSelects() {
+/* ── Settings selects (no longer used in create tab) ────────── */
+function renderSettingSelects() {
   const shops = STATE.shops;
-  // Add-item form shop select
-  const sel = $('shopSelect');
-  const cur = sel.value || CFG.defaultShop;
-  sel.innerHTML = shops.map(s =>
-    `<option value="${s.id}" ${s.id === cur ? 'selected' : ''}>${s.emoji} ${s.name}</option>`
-  ).join('');
-
-  // Settings default shop select
   const defSel = $('defaultShopSelect');
-  const defCur = defSel.value || CFG.defaultShop;
-  defSel.innerHTML = shops.map(s =>
-    `<option value="${s.id}" ${s.id === defCur ? 'selected' : ''}>${s.emoji} ${s.name}</option>`
-  ).join('');
-
-  // Layout editor shop select
+  if (defSel) {
+    const cur = defSel.value || CFG.defaultShop;
+    defSel.innerHTML = shops.map(s =>
+      `<option value="${s.id}" ${s.id === cur ? 'selected' : ''}>${s.emoji} ${s.name}</option>`
+    ).join('');
+  }
   const laySel = $('layoutShopSelect');
-  laySel.innerHTML = shops.map(s =>
-    `<option value="${s.id}">${s.emoji} ${s.name}</option>`
-  ).join('');
+  if (laySel) {
+    laySel.innerHTML = shops.map(s =>
+      `<option value="${s.id}">${s.emoji} ${s.name}</option>`
+    ).join('');
+  }
 }
 
+/* ── Shopping tab filter chips ───────────────────────────── */
 function renderShopFilterChips() {
   const container = $('shopFilterChips');
   container.innerHTML = STATE.shops.map(s => `
@@ -151,7 +162,6 @@ function renderShopFilterChips() {
     </button>
   `).join('');
   $('shopFilterAll').className = 'chip' + (STATE.activeShopFilter === null ? ' active' : '');
-
   container.querySelectorAll('.chip').forEach(btn => {
     btn.addEventListener('click', () => {
       STATE.activeShopFilter = btn.dataset.shop;
@@ -161,39 +171,342 @@ function renderShopFilterChips() {
   });
 }
 
-/* ── Create-tab list ──────────────────────────────────────── */
-function renderCreateList() {
-  const list = $('createList');
+/* ════════════════════════════════════════════════════════════
+   CREATE TAB — shop columns with inline add rows
+══════════════════════════════════════════════════════════════ */
+function renderCreateTab() {
+  // Remember which add row was open so we can restore it
+  const savedShop  = STATE.activeAddShop;
+  const savedValue = STATE.activeAddInputValue;
+
+  renderShopToggleChips();
+  renderCreateSections();
+
+  const total = STATE.items.length;
+  $('createCount').textContent = `${total} item${total !== 1 ? 's' : ''}`;
+
   const empty = $('emptyCreate');
-  const count = $('createCount');
-  const items = STATE.items;
-
-  count.textContent = `${items.length} item${items.length !== 1 ? 's' : ''}`;
-
-  if (!items.length) {
-    list.innerHTML = '';
+  if (STATE.enabledShops.length === 0) {
     empty.classList.remove('hidden');
-    return;
+  } else {
+    empty.classList.add('hidden');
   }
-  empty.classList.add('hidden');
 
+  // Restore open add row (preserves state across re-renders)
+  if (savedShop && STATE.enabledShops.includes(savedShop)) {
+    openAddRow(savedShop, savedValue, false);
+  }
+}
+
+function renderShopToggleChips() {
+  const container = $('shopToggles');
+  if (!container) return;
+  container.innerHTML = STATE.shops.map(s => {
+    const on = STATE.enabledShops.includes(s.id);
+    const style = on ? `background:${s.color};border-color:${s.color};color:#fff` : '';
+    return `<button class="shopToggleChip${on ? ' active' : ''}"
+                    data-shop="${s.id}" style="${style}">
+              ${s.emoji} ${esc(s.name)}
+            </button>`;
+  }).join('');
+  container.querySelectorAll('.shopToggleChip').forEach(btn => {
+    btn.addEventListener('click', () => toggleCreateShop(btn.dataset.shop));
+  });
+}
+
+function toggleCreateShop(shopId) {
+  const enabled = [...STATE.enabledShops];
+  const idx = enabled.indexOf(shopId);
+  if (idx >= 0) {
+    enabled.splice(idx, 1);
+    if (STATE.activeAddShop === shopId) {
+      STATE.activeAddShop       = null;
+      STATE.activeAddInputValue = '';
+    }
+  } else {
+    enabled.push(shopId);
+  }
+  STATE.enabledShops = enabled;
+  localStorage.setItem('createEnabledShops', JSON.stringify(enabled));
+  renderCreateTab();
+}
+
+function renderCreateSections() {
+  const container = $('createSections');
+  if (!container) return;
   const shopMap = shopColorMap();
-  list.innerHTML = items.map(item => {
-    const shop   = shopMap[item.shop] || { color: '#888', emoji: '🏪', name: item.shop };
-    const qty    = formatQty(item.quantity, item.unit);
-    const saving = item._saving ? ' saving' : '';
-    return `
-      <li class="itemCard${item.bought ? ' bought' : ''}${saving}" data-id="${item.id}">
-        <span class="shopDot" style="background:${shop.color}" title="${shop.name}"></span>
-        <span class="itemName">${esc(item.item)}</span>
-        ${qty ? `<span class="itemQty">${esc(qty)}</span>` : ''}
-        ${item._saving ? '<span class="savingDot" title="Saving…"></span>' : `<button class="deleteBtn" data-id="${item.id}" title="Remove">✕</button>`}
-      </li>`;
+
+  container.innerHTML = STATE.enabledShops.map(shopId => {
+    const shop = shopMap[shopId];
+    if (!shop) return '';
+    const items = STATE.items.filter(i => i.shop === shopId);
+    return renderShopSection(shop, items);
   }).join('');
 
-  list.querySelectorAll('.deleteBtn').forEach(btn => {
+  // Wire add-row placeholders
+  container.querySelectorAll('.shopAddPlaceholder').forEach(el => {
+    el.addEventListener('click', () => {
+      openAddRow(el.closest('.shopAddRow').dataset.shop, '', true);
+    });
+  });
+
+  // Wire delete buttons
+  container.querySelectorAll('.itemRowDelete').forEach(btn => {
     btn.addEventListener('click', e => { e.stopPropagation(); removeItem(btn.dataset.id); });
   });
+}
+
+const UNIT_OPTIONS = `
+  <option value="">—</option>
+  <option value="g">g</option><option value="kg">kg</option>
+  <option value="ml">ml</option><option value="L">L</option>
+  <option value="pack">pack</option><option value="tin">tin</option>
+  <option value="bottle">bottle</option><option value="bag">bag</option>
+  <option value="box">box</option><option value="bunch">bunch</option>
+  <option value="jar">jar</option><option value="tub">tub</option>
+  <option value="loaf">loaf</option><option value="head">head</option>
+  <option value="clove">clove</option><option value="tbsp">tbsp</option>
+  <option value="tsp">tsp</option>`;
+
+function renderShopSection(shop, items) {
+  const itemsHtml = items.map(item => {
+    const qty = formatQty(item.quantity, item.unit);
+    return `<div class="itemRow${item._saving ? ' saving' : ''}" data-id="${item.id}">
+      <span class="itemRowName">${esc(item.item)}</span>
+      <span class="itemRowRight">
+        ${qty ? `<span class="itemRowQty">${esc(qty)}</span>` : ''}
+        ${item._saving
+          ? '<span class="savingDot"></span>'
+          : `<button class="itemRowDelete" data-id="${item.id}" title="Remove">✕</button>`}
+      </span>
+    </div>`;
+  }).join('');
+
+  return `
+    <div class="shopSection" data-shop="${shop.id}">
+      <div class="shopSectionHeader" style="border-left:4px solid ${shop.color}">
+        <span class="shopSectionTitle">${shop.emoji} ${esc(shop.name)}</span>
+        ${items.length ? `<span class="shopSectionCount">${items.length}</span>` : ''}
+      </div>
+      <div class="sectionItems" id="sectionItems_${shop.id}">${itemsHtml}</div>
+      <div class="shopAddRow" data-shop="${shop.id}">
+        <div class="shopAddPlaceholder">
+          <span class="shopAddIcon">＋</span>
+          <span class="shopAddText">Add item…</span>
+        </div>
+        <div class="shopAddForm hidden" id="addForm_${shop.id}">
+          <div class="shopAddInputWrap">
+            <input type="text" class="shopAddInput" id="addInput_${shop.id}"
+                   placeholder="Item name…" autocomplete="off" autocorrect="off" spellcheck="false">
+            <ul class="shopAddAcList hidden" id="addAc_${shop.id}"></ul>
+          </div>
+          <input type="number" class="shopAddQty" id="addQty_${shop.id}" value="1" min="0.5" step="0.5">
+          <select class="shopAddUnit" id="addUnit_${shop.id}">${UNIT_OPTIONS}</select>
+        </div>
+      </div>
+    </div>`;
+}
+
+/* ── Inline add-row logic ─────────────────────────────────── */
+function openAddRow(shopId, initialValue = '', doFocus = true) {
+  // Close any other open add row first
+  STATE.enabledShops.forEach(id => {
+    if (id !== shopId) _closeAddRowDOM(id);
+  });
+
+  const form = $(`addForm_${shopId}`);
+  const ph   = form?.closest('.shopAddRow')?.querySelector('.shopAddPlaceholder');
+  const inp  = $(`addInput_${shopId}`);
+  if (!form || !inp) return;
+
+  STATE.activeAddShop = shopId;
+  ph?.classList.add('hidden');
+  form.classList.remove('hidden');
+
+  if (initialValue && inp.value !== initialValue) {
+    inp.value = initialValue;
+    inp.setSelectionRange(inp.value.length, inp.value.length);
+  }
+  if (doFocus) inp.focus();
+
+  // Attach handlers (idempotent — replace previous)
+  inp.onkeydown = e => handleAddKey(e, shopId);
+  inp.oninput   = () => {
+    STATE.activeAddInputValue = inp.value;
+    clearTimeout(STATE.acTimeout);
+    STATE.acTimeout = setTimeout(() => fetchAddAc(shopId), 220);
+  };
+  inp.onblur    = () => {
+    // Slight delay so mousedown on AC item fires first
+    setTimeout(() => {
+      if (STATE.acShop !== shopId) _closeAddRowDOM(shopId);
+    }, 180);
+  };
+}
+
+function _closeAddRowDOM(shopId) {
+  const form = $(`addForm_${shopId}`);
+  const ph   = form?.closest('.shopAddRow')?.querySelector('.shopAddPlaceholder');
+  if (!form) return;
+  hideAddAc(shopId);
+  form.classList.add('hidden');
+  ph?.classList.remove('hidden');
+  if (STATE.activeAddShop === shopId) {
+    STATE.activeAddShop       = null;
+    STATE.activeAddInputValue = '';
+  }
+}
+
+function handleAddKey(e, shopId) {
+  const list  = $(`addAc_${shopId}`);
+  const items = list ? list.querySelectorAll('li') : [];
+
+  if (e.key === 'ArrowDown') { e.preventDefault(); STATE.acSelected = Math.min(STATE.acSelected + 1, items.length - 1); highlightAddAc(items); return; }
+  if (e.key === 'ArrowUp')   { e.preventDefault(); STATE.acSelected = Math.max(STATE.acSelected - 1, -1); highlightAddAc(items); return; }
+  if (e.key === 'Enter') {
+    if (STATE.acSelected >= 0 && items[STATE.acSelected]) selectAddAcItem(shopId, items[STATE.acSelected]);
+    else commitAdd(shopId);
+    return;
+  }
+  if (e.key === 'Escape') { _closeAddRowDOM(shopId); return; }
+}
+
+function commitAdd(shopId) {
+  const inp  = $(`addInput_${shopId}`);
+  const qty  = $(`addQty_${shopId}`);
+  const unit = $(`addUnit_${shopId}`);
+  const name = inp?.value.trim();
+  if (!name) { _closeAddRowDOM(shopId); return; }
+
+  const item = {
+    item:     name,
+    quantity: parseFloat(qty?.value) || 1,
+    unit:     unit?.value || '',
+    shop:     shopId,
+    notes:    '',
+  };
+
+  // Reset input for next entry, keep add row open
+  inp.value   = '';
+  if (qty)  qty.value  = '1';
+  if (unit) unit.value = '';
+  hideAddAc(shopId);
+  STATE.activeAddInputValue = '';
+  inp.focus();
+
+  // Optimistic insert into DOM
+  const tempId  = 'temp_' + Date.now();
+  const tempObj = { ...item, id: tempId, bought: false, sortOrder: 999, _saving: true };
+  STATE.items.push(tempObj);
+
+  const section = $(`sectionItems_${shopId}`);
+  if (section) {
+    const div = document.createElement('div');
+    div.className  = 'itemRow saving';
+    div.dataset.id = tempId;
+    const qtyStr = formatQty(item.quantity, item.unit);
+    div.innerHTML  = `
+      <span class="itemRowName">${esc(name)}</span>
+      <span class="itemRowRight">
+        ${qtyStr ? `<span class="itemRowQty">${esc(qtyStr)}</span>` : ''}
+        <span class="savingDot"></span>
+      </span>`;
+    section.appendChild(div);
+    // Update badge
+    const badge = section.closest('.shopSection')?.querySelector('.shopSectionCount');
+    if (badge) badge.textContent = section.children.length;
+  }
+
+  // Update total count
+  const total = STATE.items.length;
+  $('createCount').textContent = `${total} item${total !== 1 ? 's' : ''}`;
+
+  // Persist
+  api('addItem', item).then(res => {
+    const entry = STATE.items.find(i => i.id === tempId);
+    if (res && entry) {
+      entry.id      = res.id;
+      entry._saving = false;
+      const el = document.querySelector(`.itemRow[data-id="${tempId}"]`);
+      if (el) {
+        el.dataset.id = res.id;
+        el.classList.remove('saving');
+        const dot = el.querySelector('.savingDot');
+        if (dot) {
+          const btn = document.createElement('button');
+          btn.className  = 'itemRowDelete';
+          btn.dataset.id = res.id;
+          btn.title      = 'Remove';
+          btn.textContent = '✕';
+          btn.addEventListener('click', ev => { ev.stopPropagation(); removeItem(res.id); });
+          dot.replaceWith(btn);
+        }
+      }
+    } else if (!res) {
+      STATE.items = STATE.items.filter(i => i.id !== tempId);
+      document.querySelector(`.itemRow[data-id="${tempId}"]`)?.remove();
+      $('createCount').textContent = `${STATE.items.length} item${STATE.items.length !== 1 ? 's' : ''}`;
+    }
+  });
+}
+
+/* ── Add-row autocomplete ─────────────────────────────────── */
+async function fetchAddAc(shopId) {
+  const inp = $(`addInput_${shopId}`);
+  const q   = inp?.value.trim();
+  if (!q || !CFG.scriptUrl) { hideAddAc(shopId); return; }
+  const res = await apiQ('getAutocomplete', { q });
+  if (!res || !res.items.length) { hideAddAc(shopId); return; }
+  showAddAc(shopId, res.items);
+}
+
+function showAddAc(shopId, items) {
+  const list = $(`addAc_${shopId}`);
+  if (!list) return;
+  const shopMap2 = shopColorMap();
+  STATE.acSelected = -1;
+  STATE.acShop = shopId;
+
+  list.innerHTML = items.map(item => {
+    const s   = item.defaultShop ? shopMap2[item.defaultShop] : null;
+    const qty = formatQty(item.defaultQty, item.defaultUnit);
+    return `<li data-item='${JSON.stringify(item).replace(/'/g, '&#39;')}'>
+      <span class="acItem">${esc(item.item)}</span>
+      <span class="acMeta">
+        ${qty ? `<span>${esc(qty)}</span>` : ''}
+        ${s ? `<span class="acShopTag">${s.emoji} ${esc(s.name)}</span>` : ''}
+      </span>
+    </li>`;
+  }).join('');
+
+  list.querySelectorAll('li').forEach(li => {
+    li.addEventListener('mousedown', e => { e.preventDefault(); selectAddAcItem(shopId, li); });
+  });
+  list.classList.remove('hidden');
+}
+
+function hideAddAc(shopId) {
+  const list = $(`addAc_${shopId}`);
+  if (list) { list.classList.add('hidden'); list.innerHTML = ''; }
+  if (STATE.acShop === shopId) { STATE.acShop = null; STATE.acSelected = -1; }
+}
+
+function selectAddAcItem(shopId, li) {
+  const item = JSON.parse(li.dataset.item);
+  const inp  = $(`addInput_${shopId}`);
+  const qty  = $(`addQty_${shopId}`);
+  const unit = $(`addUnit_${shopId}`);
+  if (inp)  inp.value  = item.item;
+  if (qty  && item.defaultQty)  qty.value  = item.defaultQty;
+  if (unit && item.defaultUnit) unit.value = item.defaultUnit;
+  STATE.activeAddInputValue = item.item;
+  hideAddAc(shopId);
+  inp?.focus();
+}
+
+function highlightAddAc(items) {
+  items.forEach((el, i) => el.classList.toggle('selected', i === STATE.acSelected));
+  if (STATE.acSelected >= 0) items[STATE.acSelected].scrollIntoView({ block: 'nearest' });
 }
 
 /* ── Shopping tab list ────────────────────────────────────── */
@@ -306,65 +619,31 @@ function renderSettingsShops() {
 // ════════════════════════════════════════════════════════════
 // Actions — List
 // ════════════════════════════════════════════════════════════
-async function addItemToList() {
-  const name = $('itemInput').value.trim();
-  if (!name) { $('itemInput').focus(); return; }
-
-  const item = {
-    item:     name,
-    quantity: parseFloat($('qtyInput').value) || 1,
-    unit:     $('unitSelect').value,
-    shop:     $('shopSelect').value || CFG.defaultShop,
-    notes:    $('notesInput').value.trim(),
-  };
-
-  // ── 1. Add to UI immediately with a temp ID ──────────────
-  const tempId   = 'temp_' + Date.now();
-  const tempItem = { ...item, id: tempId, bought: false, sortOrder: 999, _saving: true };
-  STATE.items.push(tempItem);
-  renderCreateList();
-  renderShoppingList();
-
-  // ── 2. Clear the form right away ────────────────────────
-  $('itemInput').value  = '';
-  $('notesInput').value = '';
-  $('qtyInput').value   = '1';
-  $('unitSelect').value = '';
-  $('itemInput').focus();
-  hideAutocomplete();
-
-  // ── 3. Persist in the background ────────────────────────
-  const res = await api('addItem', item);
-
-  if (res) {
-    // Swap temp ID for the real server ID
-    const entry = STATE.items.find(i => i.id === tempId);
-    if (entry) { entry.id = res.id; entry._saving = false; }
-  } else {
-    // Server failed — remove the optimistic item and restore the form
-    STATE.items = STATE.items.filter(i => i.id !== tempId);
-    $('itemInput').value  = item.item;
-    $('notesInput').value = item.notes;
-    $('qtyInput').value   = item.quantity;
-    $('unitSelect').value = item.unit;
-    $('shopSelect').value = item.shop;
-  }
-  renderCreateList();
-  renderShoppingList();
-}
 
 async function removeItem(id) {
-  // Remove immediately; restore on failure
   const removed = STATE.items.find(i => i.id === id);
   const idx     = STATE.items.indexOf(removed);
-  STATE.items   = STATE.items.filter(i => i.id !== id);
-  renderCreateList();
+
+  // Remove from STATE and DOM immediately
+  STATE.items = STATE.items.filter(i => i.id !== id);
+  document.querySelector(`.itemRow[data-id="${id}"]`)?.remove();
   renderShoppingList();
+  // Update count + badge
+  const total = STATE.items.length;
+  $('createCount').textContent = `${total} item${total !== 1 ? 's' : ''}`;
+  if (removed) {
+    const badge = document.querySelector(`#sectionItems_${removed.shop}`)
+                    ?.closest('.shopSection')?.querySelector('.shopSectionCount');
+    if (badge) {
+      const cnt = STATE.items.filter(i => i.shop === removed.shop).length;
+      badge.textContent = cnt || '';
+    }
+  }
 
   const res = await api('deleteItem', { id });
   if (!res && removed) {
-    STATE.items.splice(idx, 0, removed); // put it back in the same position
-    renderCreateList();
+    STATE.items.splice(idx, 0, removed);
+    renderCreateTab();
     renderShoppingList();
   }
 }
@@ -375,13 +654,8 @@ async function toggleBought(id) {
   const newVal = !item.bought;
   item.bought = newVal;
   renderShoppingList();
-  renderCreateList();
   const res = await api('updateItem', { id, bought: newVal });
-  if (!res) {
-    item.bought = !newVal; // revert
-    renderShoppingList();
-    renderCreateList();
-  }
+  if (!res) { item.bought = !newVal; renderShoppingList(); }
 }
 
 async function clearBought() {
@@ -389,7 +663,7 @@ async function clearBought() {
   const res = await api('clearBought');
   if (!res) return;
   STATE.items = STATE.items.filter(i => !i.bought);
-  renderCreateList();
+  renderCreateTab();
   renderShoppingList();
   toast('Bought items cleared', 'success');
 }
@@ -399,7 +673,7 @@ async function clearList() {
   const res = await api('clearList');
   if (!res) return;
   STATE.items = [];
-  renderCreateList();
+  renderCreateTab();
   renderShoppingList();
   toast('List cleared', 'success');
 }
@@ -500,92 +774,6 @@ function applySortOrder(sortedItems) {
     api('updateItem', { id: item.id, sortOrder: idx }); // persist async
   });
   renderShoppingList();
-}
-
-// ════════════════════════════════════════════════════════════
-// Autocomplete
-// ════════════════════════════════════════════════════════════
-function onItemInputKey(e) {
-  const list = $('autocompleteList');
-  const items = list.querySelectorAll('li');
-
-  if (e.key === 'ArrowDown') {
-    e.preventDefault();
-    STATE.acSelected = Math.min(STATE.acSelected + 1, items.length - 1);
-    highlightAc(items);
-    return;
-  }
-  if (e.key === 'ArrowUp') {
-    e.preventDefault();
-    STATE.acSelected = Math.max(STATE.acSelected - 1, -1);
-    highlightAc(items);
-    return;
-  }
-  if (e.key === 'Enter') {
-    if (STATE.acSelected >= 0 && items[STATE.acSelected]) {
-      items[STATE.acSelected].click();
-    } else {
-      addItemToList();
-    }
-    return;
-  }
-  if (e.key === 'Escape') { hideAutocomplete(); return; }
-
-  clearTimeout(STATE.acTimeout);
-  STATE.acTimeout = setTimeout(() => fetchAutocomplete($('itemInput').value), 250);
-}
-
-async function fetchAutocomplete(q) {
-  if (!q.trim() || !CFG.scriptUrl) { hideAutocomplete(); return; }
-  const res = await apiQ('getAutocomplete', { q });
-  if (!res || !res.items.length) { hideAutocomplete(); return; }
-  showAutocomplete(res.items);
-}
-
-function showAutocomplete(items) {
-  const list = $('autocompleteList');
-  const shopMap = shopColorMap();
-  STATE.acSelected = -1;
-
-  list.innerHTML = items.map(item => {
-    const shop = item.defaultShop ? shopMap[item.defaultShop] : null;
-    const qty  = formatQty(item.defaultQty, item.defaultUnit);
-    return `
-      <li data-item='${JSON.stringify(item).replace(/'/g, '&#39;')}'>
-        <span class="acItem">${esc(item.item)}</span>
-        <span class="acMeta">
-          ${qty ? `<span>${esc(qty)}</span>` : ''}
-          ${shop ? `<span class="acShopTag">${shop.emoji} ${esc(shop.name)}</span>` : ''}
-        </span>
-      </li>`;
-  }).join('');
-
-  list.querySelectorAll('li').forEach(li => {
-    li.addEventListener('mousedown', e => { e.preventDefault(); selectAcItem(li); });
-  });
-
-  list.classList.remove('hidden');
-}
-
-function selectAcItem(li) {
-  const item = JSON.parse(li.dataset.item);
-  $('itemInput').value = item.item;
-  if (item.defaultQty)  $('qtyInput').value   = item.defaultQty;
-  if (item.defaultUnit) $('unitSelect').value  = item.defaultUnit;
-  if (item.defaultShop) $('shopSelect').value  = item.defaultShop;
-  hideAutocomplete();
-  $('itemInput').focus();
-}
-
-function hideAutocomplete() {
-  $('autocompleteList').classList.add('hidden');
-  $('autocompleteList').innerHTML = '';
-  STATE.acSelected = -1;
-}
-
-function highlightAc(items) {
-  items.forEach((el, i) => el.classList.toggle('selected', i === STATE.acSelected));
-  if (STATE.acSelected >= 0) items[STATE.acSelected].scrollIntoView({ block: 'nearest' });
 }
 
 // ════════════════════════════════════════════════════════════
@@ -737,17 +925,6 @@ function wire() {
 
   // Header buttons
   $('refreshBtn').addEventListener('click', loadAll);
-
-  // Add item
-  $('addBtn').addEventListener('click', addItemToList);
-  $('itemInput').addEventListener('keydown', onItemInputKey);
-  $('itemInput').addEventListener('blur', () => setTimeout(hideAutocomplete, 150));
-
-  // Batch fill shop/qty/unit defaults from autocomplete selection
-  $('itemInput').addEventListener('input', () => {
-    clearTimeout(STATE.acTimeout);
-    STATE.acTimeout = setTimeout(() => fetchAutocomplete($('itemInput').value), 250);
-  });
 
   // List management
   $('clearListBtn').addEventListener('click', clearList);

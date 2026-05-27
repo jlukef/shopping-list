@@ -337,6 +337,205 @@ a  { color: var(--primary); }
 }
 .itemCard { animation: itemSlideIn .18s ease; }
 
+/* ── Create tab header ───────────────────────────────────── */
+.createHeader {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.shopToggles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.shopToggleChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 13px;
+  border-radius: 20px;
+  border: 1.5px solid var(--border);
+  background: var(--surface2);
+  color: var(--txt2);
+  font-size: .82rem;
+  font-weight: 600;
+  transition: all .15s;
+  cursor: pointer;
+}
+.shopToggleChip:hover  { border-color: var(--txt3); color: var(--txt); }
+.shopToggleChip.active { color: #fff; /* bg & border set inline per shop colour */ }
+
+.createMeta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 2px;
+}
+
+/* ── Shop section columns ────────────────────────────────── */
+.createSections {
+  display: grid;
+  grid-template-columns: 1fr;   /* single column on mobile */
+  gap: 10px;
+  align-items: start;
+}
+
+.shopSection {
+  background: var(--surface);
+  border-radius: var(--radius);
+  overflow: hidden;
+  box-shadow: var(--shadow-sm);
+}
+
+.shopSectionHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 11px 14px;
+  border-bottom: 1px solid var(--border);
+  border-left: 4px solid transparent; /* colour set inline */
+}
+
+.shopSectionTitle { font-size: .9rem; font-weight: 700; }
+.shopSectionCount {
+  font-size: .78rem;
+  font-weight: 600;
+  background: var(--surface2);
+  border-radius: 10px;
+  padding: 2px 8px;
+  color: var(--txt2);
+}
+
+/* ── Item rows inside a section ──────────────────────────── */
+.sectionItems { display: flex; flex-direction: column; }
+
+.itemRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 14px;
+  border-bottom: 1px solid var(--border);
+  animation: itemSlideIn .15s ease;
+  transition: background .15s;
+}
+.itemRow:hover { background: var(--surface2); }
+.itemRow.saving { opacity: .55; }
+
+.itemRowName { flex: 1; font-size: .9rem; }
+.itemRowRight {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.itemRowQty {
+  font-size: .78rem;
+  color: var(--txt2);
+  background: var(--surface2);
+  border-radius: 4px;
+  padding: 2px 6px;
+}
+.itemRowDelete {
+  background: none;
+  border: none;
+  color: var(--txt3);
+  font-size: .95rem;
+  padding: 3px 5px;
+  border-radius: var(--radius-sm);
+  line-height: 1;
+  cursor: pointer;
+}
+.itemRowDelete:hover { color: var(--red); background: var(--red-lt); }
+
+/* ── Add row ─────────────────────────────────────────────── */
+.shopAddRow { cursor: pointer; }
+
+.shopAddPlaceholder {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  color: var(--txt3);
+  font-size: .88rem;
+  transition: background .15s, color .15s;
+  user-select: none;
+}
+.shopAddPlaceholder:hover { background: #f0f4ff; color: var(--primary); }
+.shopAddIcon { font-size: 1rem; line-height: 1; }
+
+.shopAddForm {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  background: #f0f4ff;
+  border-top: 1px solid #dde6fb;
+}
+
+.shopAddInputWrap {
+  position: relative;
+  flex: 1;
+}
+
+.shopAddInput {
+  width: 100%;
+  border: 1.5px solid var(--primary);
+  border-radius: var(--radius-sm);
+  padding: 7px 10px;
+  font-size: .9rem;
+  outline: none;
+  background: #fff;
+}
+
+.shopAddAcList {
+  position: absolute;
+  top: calc(100% + 2px);
+  left: 0; right: 0;
+  z-index: 60;
+  background: var(--surface);
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-md);
+  max-height: 220px;
+  overflow-y: auto;
+}
+.shopAddAcList.hidden { display: none; }
+.shopAddAcList li {
+  padding: 9px 12px;
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid var(--border);
+  font-size: .88rem;
+}
+.shopAddAcList li:last-child { border-bottom: none; }
+.shopAddAcList li:hover, .shopAddAcList li.selected { background: #f0f4ff; }
+
+.shopAddQty {
+  width: 52px;
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 7px 4px;
+  text-align: center;
+  font-size: .85rem;
+  background: #fff;
+}
+.shopAddQty:focus { border-color: var(--primary); outline: none; }
+
+.shopAddUnit {
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 7px 4px;
+  font-size: .82rem;
+  background: #fff;
+  width: 64px;
+}
+.shopAddUnit:focus { border-color: var(--primary); outline: none; }
+
 /* ── Empty states ────────────────────────────────────────── */
 .emptyState {
   text-align: center;
@@ -766,12 +965,12 @@ a  { color: var(--primary); }
     padding: calc(var(--header-h) + 48px + 24px) 24px 48px;
   }
 
-  /* ── Add-item card ──────────────────────────────────────── */
-  .addCard { padding: 18px 20px; }
-
-  .detailRow { gap: 12px; }
-  .qtyInput  { width: 80px; }
-  .unitSelect { width: 100px; }
+  /* ── Create tab: 2-col grid from 768px ─────────────────── */
+  .createSections {
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  }
+  .createHeader { flex-direction: row; align-items: center; flex-wrap: wrap; gap: 10px; }
+  .shopToggles  { flex: 1; }
 
   /* ── Item cards ─────────────────────────────────────────── */
   .shopItem  { padding: 13px 18px; }
