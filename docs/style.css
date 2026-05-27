@@ -386,7 +386,8 @@ a  { color: var(--primary); }
 .shopSection {
   background: var(--surface);
   border-radius: var(--radius);
-  overflow: hidden;
+  /* overflow:hidden removed — it was clipping the autocomplete dropdown.
+     Top corners are preserved by border-radius on the header instead. */
   box-shadow: var(--shadow-sm);
 }
 
@@ -397,6 +398,7 @@ a  { color: var(--primary); }
   padding: 11px 14px;
   border-bottom: 1px solid var(--border);
   border-left: 4px solid transparent; /* colour set inline */
+  border-radius: var(--radius) var(--radius) 0 0; /* preserve card top corners */
 }
 
 /* flex:1 pushes the count badge to the right regardless of whether it's present */
@@ -508,7 +510,7 @@ a  { color: var(--primary); }
   position: absolute;
   top: calc(100% + 2px);
   left: 0; right: 0;
-  z-index: 60;
+  z-index: 120; /* must clear adjacent shop cards and their contents */
   background: var(--surface);
   border: 1.5px solid var(--border);
   border-radius: var(--radius-sm);
