@@ -179,14 +179,15 @@ function renderCreateList() {
 
   const shopMap = shopColorMap();
   list.innerHTML = items.map(item => {
-    const shop = shopMap[item.shop] || { color: '#888', emoji: '🏪', name: item.shop };
-    const qty  = formatQty(item.quantity, item.unit);
+    const shop   = shopMap[item.shop] || { color: '#888', emoji: '🏪', name: item.shop };
+    const qty    = formatQty(item.quantity, item.unit);
+    const saving = item._saving ? ' saving' : '';
     return `
-      <li class="itemCard${item.bought ? ' bought' : ''}" data-id="${item.id}">
+      <li class="itemCard${item.bought ? ' bought' : ''}${saving}" data-id="${item.id}">
         <span class="shopDot" style="background:${shop.color}" title="${shop.name}"></span>
         <span class="itemName">${esc(item.item)}</span>
         ${qty ? `<span class="itemQty">${esc(qty)}</span>` : ''}
-        <button class="deleteBtn" data-id="${item.id}" title="Remove">✕</button>
+        ${item._saving ? '<span class="savingDot" title="Saving…"></span>' : `<button class="deleteBtn" data-id="${item.id}" title="Remove">✕</button>`}
       </li>`;
   }).join('');
 
@@ -306,7 +307,7 @@ function renderSettingsShops() {
 // Actions — List
 // ════════════════════════════════════════════════════════════
 async function addItemToList() {
-  const name  = $('itemInput').value.trim();
+  const name = $('itemInput').value.trim();
   if (!name) { $('itemInput').focus(); return; }
 
   const item = {
@@ -317,29 +318,55 @@ async function addItemToList() {
     notes:    $('notesInput').value.trim(),
   };
 
-  const res = await api('addItem', item);
-  if (!res) return;
-
-  // Optimistic local update
-  STATE.items.push({ ...item, id: res.id, bought: false, sortOrder: 999 });
+  // ── 1. Add to UI immediately with a temp ID ──────────────
+  const tempId   = 'temp_' + Date.now();
+  const tempItem = { ...item, id: tempId, bought: false, sortOrder: 999, _saving: true };
+  STATE.items.push(tempItem);
   renderCreateList();
   renderShoppingList();
 
-  // Reset form
+  // ── 2. Clear the form right away ────────────────────────
   $('itemInput').value  = '';
   $('notesInput').value = '';
   $('qtyInput').value   = '1';
   $('unitSelect').value = '';
   $('itemInput').focus();
   hideAutocomplete();
+
+  // ── 3. Persist in the background ────────────────────────
+  const res = await api('addItem', item);
+
+  if (res) {
+    // Swap temp ID for the real server ID
+    const entry = STATE.items.find(i => i.id === tempId);
+    if (entry) { entry.id = res.id; entry._saving = false; }
+  } else {
+    // Server failed — remove the optimistic item and restore the form
+    STATE.items = STATE.items.filter(i => i.id !== tempId);
+    $('itemInput').value  = item.item;
+    $('notesInput').value = item.notes;
+    $('qtyInput').value   = item.quantity;
+    $('unitSelect').value = item.unit;
+    $('shopSelect').value = item.shop;
+  }
+  renderCreateList();
+  renderShoppingList();
 }
 
 async function removeItem(id) {
-  const res = await api('deleteItem', { id });
-  if (!res) return;
-  STATE.items = STATE.items.filter(i => i.id !== id);
+  // Remove immediately; restore on failure
+  const removed = STATE.items.find(i => i.id === id);
+  const idx     = STATE.items.indexOf(removed);
+  STATE.items   = STATE.items.filter(i => i.id !== id);
   renderCreateList();
   renderShoppingList();
+
+  const res = await api('deleteItem', { id });
+  if (!res && removed) {
+    STATE.items.splice(idx, 0, removed); // put it back in the same position
+    renderCreateList();
+    renderShoppingList();
+  }
 }
 
 async function toggleBought(id) {

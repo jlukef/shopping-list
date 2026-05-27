@@ -317,6 +317,26 @@ a  { color: var(--primary); }
 }
 .deleteBtn:hover { color: var(--red); background: var(--red-lt); }
 
+/* Saving indicator — shown while item is being persisted */
+.itemCard.saving { opacity: .6; }
+
+.savingDot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  border: 2px solid var(--txt3);
+  border-top-color: var(--primary);
+  animation: spin .7s linear infinite;
+  flex-shrink: 0;
+  margin: 0 4px;
+}
+
+/* Slide-in for newly added items */
+@keyframes itemSlideIn {
+  from { opacity: 0; transform: translateY(-6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.itemCard { animation: itemSlideIn .18s ease; }
+
 /* ── Empty states ────────────────────────────────────────── */
 .emptyState {
   text-align: center;
