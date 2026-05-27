@@ -686,3 +686,136 @@ a  { color: var(--primary); }
 
 /* ── Utility ─────────────────────────────────────────────── */
 .hidden { display: none !important; }
+
+/* ════════════════════════════════════════════════════════════
+   DESKTOP  (≥ 768 px)
+   - Tab bar moves from bottom → just below the header
+   - Content centred in a max-width column
+   - Modals become centred dialogs instead of bottom sheets
+   - Two-column shopping list on wide screens (≥ 1080px)
+══════════════════════════════════════════════════════════════ */
+@media (min-width: 768px) {
+
+  /* Subtle page background so the content card stands out */
+  body { background: #dde1e9; }
+
+  /* ── Header ─────────────────────────────────────────────── */
+  #appHeader { padding: 0 24px; }
+  #headerTitle { font-size: 1.2rem; }
+
+  /* ── Tab bar → horizontal strip below the header ────────── */
+  #tabBar {
+    position: fixed;
+    top: var(--header-h);
+    bottom: auto;
+    height: 48px;
+    padding-bottom: 0;
+    background: #fff;
+    border-top: none;
+    border-bottom: 1px solid var(--border);
+    box-shadow: 0 2px 6px rgba(0,0,0,.07);
+    justify-content: center;
+    gap: 0;
+  }
+
+  .tab {
+    flex-direction: row;
+    gap: 7px;
+    color: var(--txt2);
+    font-size: .9rem;
+    padding: 0 28px;
+    max-width: 220px;
+    border-bottom: 3px solid transparent;
+    transition: color .15s, border-color .15s;
+  }
+  .tab.active {
+    color: var(--primary);
+    border-bottom-color: var(--primary);
+  }
+  .tab:hover { color: var(--txt); background: var(--surface2); }
+  .tab.active:hover { color: var(--primary); background: none; }
+
+  .tabIcon  { font-size: 1.05rem; }
+  .tabLabel { font-size: .88rem; font-weight: 600; letter-spacing: 0; }
+
+  /* ── Content area ───────────────────────────────────────── */
+  .tabContent {
+    max-width: 780px;
+    margin: 0 auto;
+    /* top: header + tab bar + gap  |  bottom: comfortable breathing room */
+    padding: calc(var(--header-h) + 48px + 24px) 24px 48px;
+  }
+
+  /* ── Add-item card ──────────────────────────────────────── */
+  .addCard { padding: 18px 20px; }
+
+  .detailRow { gap: 12px; }
+  .qtyInput  { width: 80px; }
+  .unitSelect { width: 100px; }
+
+  /* ── Item cards ─────────────────────────────────────────── */
+  .shopItem  { padding: 13px 18px; }
+  .shopItem:hover { background: #f0f4ff; cursor: pointer; }
+  .itemCard  { padding: 13px 16px; }
+
+  /* ── Toolbar ────────────────────────────────────────────── */
+  .shopToolbar { padding: 12px 18px; }
+  .actionBtn   { flex: none; padding: 9px 20px; }
+
+  /* ── Toast — clear of the new top tab bar ───────────────── */
+  .toast { bottom: 24px; }
+
+  /* ════════════════════════════════════════════════════════
+     MODALS → centred dialogs, not bottom sheets
+  ══════════════════════════════════════════════════════════ */
+  .modal {
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+  }
+
+  .modalBackdrop { background: rgba(0,0,0,.45); }
+
+  .modalSheet {
+    border-radius: 20px;
+    width: 100%;
+    max-width: 580px;
+    max-height: 88vh;
+    /* replace slide-up with a gentle scale-in */
+    animation: desktopModalIn .2s ease;
+  }
+
+  .modalSheet.compact { max-width: 380px; }
+
+  @keyframes desktopModalIn {
+    from { opacity: 0; transform: scale(.96) translateY(8px); }
+    to   { opacity: 1; transform: scale(1)   translateY(0); }
+  }
+
+  /* ── Settings body: two-column grid for sections ────────── */
+  .modalBody { padding: 20px 24px; gap: 22px; }
+
+  /* ── Layout editor taller on desktop ────────────────────── */
+  .layoutEditor { min-height: 260px; }
+}
+
+/* ════════════════════════════════════════════════════════════
+   WIDE DESKTOP (≥ 1080 px)
+   Shopping tab: two-column grid for shop groups
+══════════════════════════════════════════════════════════════ */
+@media (min-width: 1080px) {
+  .tabContent { max-width: 1060px; }
+
+  /* Shopping list → two columns of shop groups */
+  #shopTab .shoppingList {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    align-items: start;
+    gap: 12px;
+  }
+
+  /* Toolbar stretches to match wider content */
+  .shopToolbar { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+  .shopFilter  { flex: 1; margin-bottom: 0; }
+  .shopActions { flex-shrink: 0; }
+}
