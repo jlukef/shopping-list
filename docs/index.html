@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="theme-color" content="#1a1a2e">
+  <title>Shopping List</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- ── Header ──────────────────────────────────────────── -->
+  <header id="appHeader">
+    <span id="headerTitle">🛒 Shopping List</span>
+    <div class="headerActions">
+      <button id="refreshBtn" class="iconBtn" title="Refresh list">↻</button>
+      <button id="settingsBtn" class="iconBtn" title="Settings">⚙</button>
+    </div>
+  </header>
+
+  <!-- ── Tab bar ─────────────────────────────────────────── -->
+  <nav id="tabBar">
+    <button class="tab active" data-tab="create">
+      <span class="tabIcon">📝</span>
+      <span class="tabLabel">List</span>
+    </button>
+    <button class="tab" data-tab="shop">
+      <span class="tabIcon">🛍️</span>
+      <span class="tabLabel">Shopping</span>
+    </button>
+  </nav>
+
+  <!-- ── Toast ───────────────────────────────────────────── -->
+  <div id="toast" class="toast hidden"></div>
+
+  <!-- ════════════════════════════════════════════════════════
+       TAB 1 — List Creation
+  ══════════════════════════════════════════════════════════ -->
+  <div id="createTab" class="tabContent active">
+
+    <!-- Add-item form -->
+    <div class="addCard">
+      <div class="inputRow">
+        <div class="autocompleteWrap">
+          <input id="itemInput" type="text" placeholder="Add item…" autocomplete="off" autocorrect="off" spellcheck="false">
+          <ul id="autocompleteList" class="autocompleteList hidden"></ul>
+        </div>
+        <button id="addBtn" class="addBtn">＋</button>
+      </div>
+
+      <div class="detailRow">
+        <input id="qtyInput" type="number" value="1" min="0.5" step="0.5" class="qtyInput">
+        <select id="unitSelect" class="unitSelect">
+          <option value="">—</option>
+          <option value="g">g</option>
+          <option value="kg">kg</option>
+          <option value="ml">ml</option>
+          <option value="L">L</option>
+          <option value="pack">pack</option>
+          <option value="tin">tin</option>
+          <option value="bottle">bottle</option>
+          <option value="bag">bag</option>
+          <option value="box">box</option>
+          <option value="bunch">bunch</option>
+          <option value="jar">jar</option>
+          <option value="tub">tub</option>
+          <option value="slice">slice</option>
+          <option value="loaf">loaf</option>
+          <option value="head">head</option>
+          <option value="clove">clove</option>
+          <option value="tbsp">tbsp</option>
+          <option value="tsp">tsp</option>
+        </select>
+        <select id="shopSelect" class="shopSelect"></select>
+      </div>
+
+      <div class="notesRow">
+        <input id="notesInput" type="text" placeholder="Notes (optional)…" class="notesInput">
+      </div>
+    </div>
+
+    <!-- Current list items -->
+    <div id="createListContainer">
+      <div class="listHeader">
+        <span id="createCount" class="listCount">0 items</span>
+        <button id="clearListBtn" class="dangerLinkBtn">Clear all</button>
+      </div>
+      <ul id="createList" class="itemList"></ul>
+      <div id="emptyCreate" class="emptyState">
+        <div class="emptyIcon">🛒</div>
+        <p>Your list is empty.<br>Add something above!</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════════════════════════════════════════════════════════
+       TAB 2 — Shopping
+  ══════════════════════════════════════════════════════════ -->
+  <div id="shopTab" class="tabContent">
+
+    <div class="shopToolbar">
+      <div class="shopFilter">
+        <span class="shopFilterLabel">Shop:</span>
+        <div id="shopFilterChips" class="shopFilterChips"></div>
+        <button id="shopFilterAll" class="chip active">All</button>
+      </div>
+      <div class="shopActions">
+        <button id="sortBtn" class="actionBtn">🤖 Sort</button>
+        <button id="clearBoughtBtn" class="actionBtn secondary">✓ Clear bought</button>
+      </div>
+    </div>
+
+    <div id="progressBar" class="progressWrap hidden">
+      <div class="progressTrack"><div id="progressFill" class="progressFill"></div></div>
+      <span id="progressLabel" class="progressLabel"></span>
+    </div>
+
+    <div id="shoppingList" class="shoppingList"></div>
+
+    <div id="emptyShop" class="emptyState hidden">
+      <div class="emptyIcon">✅</div>
+      <p>All done!<br>Tap "Clear bought" to reset.</p>
+    </div>
+  </div>
+
+  <!-- ════════════════════════════════════════════════════════
+       Settings modal
+  ══════════════════════════════════════════════════════════ -->
+  <div id="settingsModal" class="modal hidden" role="dialog" aria-modal="true">
+    <div class="modalBackdrop" id="modalBackdrop"></div>
+    <div class="modalSheet">
+      <div class="modalHeader">
+        <h2>Settings</h2>
+        <button class="closeBtn" id="closeSettings">✕</button>
+      </div>
+      <div class="modalBody">
+
+        <section class="settingSection">
+          <h3>Apps Script URL</h3>
+          <p class="hint">Paste the web app URL after you deploy the script.</p>
+          <input id="scriptUrlInput" type="url" placeholder="https://script.google.com/macros/s/…/exec" class="fullInput">
+          <div class="btnRow">
+            <button id="testConnectionBtn" class="pill">Test connection</button>
+            <button id="runSetupBtn" class="pill primary">Run setup</button>
+          </div>
+        </section>
+
+        <section class="settingSection">
+          <h3>Gemini API Key</h3>
+          <p class="hint">Used for AI aisle-order sorting. Stored in your browser only.</p>
+          <input id="geminiKeyInput" type="password" placeholder="AIza…" class="fullInput">
+        </section>
+
+        <section class="settingSection">
+          <h3>Default Shop</h3>
+          <select id="defaultShopSelect" class="fullInput"></select>
+        </section>
+
+        <section class="settingSection">
+          <h3>Shops</h3>
+          <ul id="shopsList" class="shopManageList"></ul>
+          <div class="addShopRow">
+            <input id="newShopName"  type="text"  placeholder="Shop name" class="flexInput">
+            <input id="newShopEmoji" type="text"  placeholder="🏪" maxlength="2" class="emojiInput">
+            <input id="newShopColor" type="color" value="#888888" class="colorInput">
+            <button id="addShopBtn" class="pill">Add</button>
+          </div>
+        </section>
+
+        <section class="settingSection">
+          <h3>Store Layout Editor</h3>
+          <p class="hint">
+            Define aisle order for a shop — one department per line, keywords comma-separated.
+            Format: <code>Dept Name | kw1, kw2, kw3</code>
+          </p>
+          <select id="layoutShopSelect" class="fullInput"></select>
+          <textarea id="layoutEditor" class="layoutEditor" placeholder="Fresh Produce | fruit, veg, tomato, onion&#10;Bakery | bread, rolls, loaf&#10;…"></textarea>
+          <div class="btnRow">
+            <button id="loadLayoutBtn"  class="pill">Load</button>
+            <button id="saveLayoutBtn"  class="pill primary">Save layout</button>
+          </div>
+        </section>
+
+        <div class="btnRow centre">
+          <button id="saveSettingsBtn" class="pill primary large">Save settings</button>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- Sort shop picker -->
+  <div id="sortModal" class="modal hidden" role="dialog">
+    <div class="modalBackdrop" id="sortModalBackdrop"></div>
+    <div class="modalSheet compact">
+      <div class="modalHeader">
+        <h2>Sort for which shop?</h2>
+        <button class="closeBtn" id="closeSortModal">✕</button>
+      </div>
+      <div class="modalBody">
+        <ul id="sortShopList" class="shopPickList"></ul>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
