@@ -228,7 +228,13 @@ function toggleCreateShop(shopId) {
   }
   STATE.enabledShops = enabled;
   localStorage.setItem('createEnabledShops', JSON.stringify(enabled));
-  renderCreateTab();
+
+  // Animate columns sliding to their new positions
+  if (document.startViewTransition) {
+    document.startViewTransition(() => renderCreateTab());
+  } else {
+    renderCreateTab();
+  }
 }
 
 function renderCreateSections() {
@@ -283,7 +289,8 @@ function renderShopSection(shop, items) {
   }).join('');
 
   return `
-    <div class="shopSection" data-shop="${shop.id}">
+    <div class="shopSection" data-shop="${shop.id}"
+         style="view-transition-name: shop-${shop.id}">
       <div class="shopSectionHeader" style="border-left:4px solid ${shop.color}">
         <span class="shopSectionTitle">${shop.emoji} ${esc(shop.name)}</span>
         ${items.length ? `<span class="shopSectionCount">${items.length}</span>` : ''}

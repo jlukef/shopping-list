@@ -906,6 +906,36 @@ a  { color: var(--primary); }
 /* ── Utility ─────────────────────────────────────────────── */
 .hidden { display: none !important; }
 
+/* ── View Transitions — shop column animations ───────────── */
+/* Suppress the default full-page crossfade so only the named
+   shop columns animate when toggled on/off.                  */
+::view-transition-old(root),
+::view-transition-new(root) { animation: none; }
+
+/* Columns that are moving to a new grid position */
+::view-transition-group(*) {
+  animation-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  animation-duration: 320ms;
+}
+
+/* Column fading out (being disabled) */
+::view-transition-old(*) {
+  animation: 200ms ease-out both vtColOut;
+}
+
+/* Column fading in (being enabled, or landing in new spot) */
+::view-transition-new(*) {
+  animation: 260ms cubic-bezier(0.34, 1.4, 0.64, 1) both vtColIn;
+}
+
+@keyframes vtColOut {
+  to { opacity: 0; scale: 0.88; }
+}
+@keyframes vtColIn {
+  from { opacity: 0; scale: 0.88; }
+  to   { opacity: 1; scale: 1; }
+}
+
 /* ════════════════════════════════════════════════════════════
    DESKTOP  (≥ 768 px)
    - Tab bar moves from bottom → just below the header
