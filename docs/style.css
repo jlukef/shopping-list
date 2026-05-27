@@ -393,13 +393,14 @@ a  { color: var(--primary); }
 .shopSectionHeader {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 6px;
   padding: 11px 14px;
   border-bottom: 1px solid var(--border);
   border-left: 4px solid transparent; /* colour set inline */
 }
 
-.shopSectionTitle { font-size: .9rem; font-weight: 700; }
+/* flex:1 pushes the count badge to the right regardless of whether it's present */
+.shopSectionTitle { font-size: .9rem; font-weight: 700; flex: 1; }
 .shopSectionCount {
   font-size: .78rem;
   font-weight: 600;
@@ -926,6 +927,25 @@ a  { color: var(--primary); }
 }
 .dragHandle:hover  { opacity: 1; cursor: grab; }
 .dragHandle:active { cursor: grabbing; }
+
+/* Smaller handle for individual item rows */
+.itemDragHandle {
+  display: inline-block;
+  flex-shrink: 0;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  box-sizing: border-box;
+  width: 8px;
+  height: 14px;
+  border-left:  2px dotted var(--txt3);
+  border-right: 2px dotted var(--txt3);
+  opacity: .4;
+  transition: opacity .15s;
+  vertical-align: middle;
+}
+.itemDragHandle:hover  { opacity: .9; }
+.itemDragHandle:active { cursor: grabbing; }
 
 /* Ghost = semi-transparent slot shown while dragging */
 .sortable-ghost { opacity: .35; }

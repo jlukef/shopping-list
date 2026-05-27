@@ -144,6 +144,30 @@ function reorderShops(orderedSubsetIds) {
   renderAll();
 }
 
+function reorderItems(orderedIds, shopId) {
+  // Map id → new sortOrder index
+  const newOrder = new Map(orderedIds.map((id, i) => [id, i]));
+
+  // Update sortOrder on STATE items
+  STATE.items.forEach(item => {
+    if (newOrder.has(item.id)) item.sortOrder = newOrder.get(item.id);
+  });
+
+  // Reposition this shop's items within STATE.items so create-tab
+  // re-renders preserve the visual order (slot-preserving swap)
+  const slots = [];
+  STATE.items.forEach((item, i) => { if (item.shop === shopId) slots.push(i); });
+  const reordered = orderedIds.map(id => STATE.items.find(i => i.id === id)).filter(Boolean);
+  reordered.forEach((item, j) => { STATE.items[slots[j]] = item; });
+
+  // Persist async (skip temp items that haven't been saved yet)
+  orderedIds.forEach((id, idx) => {
+    if (!id.startsWith('temp_')) api('updateItem', { id, sortOrder: idx });
+  });
+
+  renderShoppingList(); // re-sort shopping tab with new sortOrders
+}
+
 async function loadLayouts(shopId) {
   const res = await apiQ('getLayouts', { shop: shopId });
   if (res) STATE.layouts[shopId] = res.layouts || [];
@@ -327,6 +351,7 @@ function renderShopSection(shop, items) {
   const itemsHtml = items.map(item => {
     const qty = formatQty(item.quantity, item.unit);
     return `<div class="itemRow${item._saving ? ' saving' : ''}" data-id="${item.id}">
+      <span class="itemDragHandle"></span>
       <span class="itemRowName">${esc(item.item)}</span>
       <span class="itemRowRight">
         ${qty ? `<span class="itemRowQty">${esc(qty)}</span>` : ''}
@@ -463,6 +488,7 @@ function commitAdd(shopId) {
     div.dataset.id = tempId;
     const qtyStr = formatQty(item.quantity, item.unit);
     div.innerHTML  = `
+      <span class="itemDragHandle"></span>
       <span class="itemRowName">${esc(name)}</span>
       <span class="itemRowRight">
         ${qtyStr ? `<span class="itemRowQty">${esc(qtyStr)}</span>` : ''}
@@ -633,15 +659,19 @@ function renderShoppingList() {
                   ${qty ? `<div class="shopItemQty">${esc(qty)}</div>` : ''}
                   ${item.notes ? `<div class="shopItemNotes">${esc(item.notes)}</div>` : ''}
                 </div>
+                <span class="itemDragHandle"></span>
               </div>`;
           }).join('')}
         </div>
       </div>`;
   }).join('');
 
-  // Click to toggle bought
+  // Click to toggle bought (ignore clicks on the drag handle)
   container.querySelectorAll('.shopItem').forEach(el => {
-    el.addEventListener('click', () => toggleBought(el.dataset.id));
+    el.addEventListener('click', e => {
+      if (e.target.closest('.itemDragHandle')) return;
+      toggleBought(el.dataset.id);
+    });
   });
 }
 
@@ -1032,6 +1062,41 @@ function initAllSortables() {
       },
     });
   }
+
+  // ── Items within each create-tab section ─────────────────
+  const itemBase = {
+    animation:        150,
+    handle:           '.itemDragHandle',
+    filter:           '.saving',       // don't drag items still being saved
+    delay:            150,
+    delayOnTouchOnly: true,
+    ghostClass:       'sortable-ghost',
+    chosenClass:      'sortable-chosen',
+  };
+
+  document.querySelectorAll('.sectionItems').forEach(el => {
+    const shopId = el.id.replace('sectionItems_', '');
+    SORTABLES['section_' + shopId] = new Sortable(el, {
+      ...itemBase,
+      onEnd() {
+        const newIds = [...el.querySelectorAll('.itemRow')].map(r => r.dataset.id);
+        reorderItems(newIds, shopId);
+      },
+    });
+  });
+
+  // ── Items within each shopping-tab group ──────────────────
+  document.querySelectorAll('.shopItems').forEach(el => {
+    const shopId = el.closest('.shopGroup')?.dataset.shop;
+    if (!shopId) return;
+    SORTABLES['shopItems_' + shopId] = new Sortable(el, {
+      ...itemBase,
+      onEnd() {
+        const newIds = [...el.querySelectorAll('.shopItem')].map(r => r.dataset.id);
+        reorderItems(newIds, shopId);
+      },
+    });
+  });
 }
 
 // ════════════════════════════════════════════════════════════
