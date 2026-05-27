@@ -425,7 +425,20 @@ a  { color: var(--primary); }
 .itemRow:hover { background: var(--surface2); }
 .itemRow.saving { opacity: .55; }
 
-.itemRowName { flex: 1; font-size: .9rem; }
+.itemRowName { flex: 1; font-size: .9rem; cursor: text; }
+
+.itemRowNameEdit {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  border-bottom: 1.5px solid var(--primary);
+  outline: none;
+  font-size: .9rem;
+  font-family: inherit;
+  background: transparent;
+  color: var(--txt);
+  padding: 0 2px;
+}
 .itemRowRight {
   display: flex;
   align-items: center;

@@ -333,6 +333,17 @@ function renderCreateSections() {
   container.querySelectorAll('.itemRowDelete').forEach(btn => {
     btn.addEventListener('click', e => { e.stopPropagation(); removeItem(btn.dataset.id); });
   });
+
+  // Wire inline name editing — click item name to edit in place
+  container.querySelectorAll('.itemRowName').forEach(span => {
+    span.addEventListener('click', e => {
+      e.stopPropagation();
+      const row = span.closest('.itemRow');
+      const id  = row?.dataset.id;
+      if (!id || id.startsWith('temp_') || row.classList.contains('saving')) return;
+      editItemName(span, id);
+    });
+  });
 }
 
 const UNIT_OPTIONS = `
@@ -653,13 +664,13 @@ function renderShoppingList() {
             const qty = formatQty(item.quantity, item.unit);
             return `
               <div class="shopItem${item.bought ? ' bought' : ''}" data-id="${item.id}">
+                <span class="itemDragHandle"></span>
                 <div class="checkCircle">${item.bought ? '✓' : ''}</div>
                 <div class="shopItemInfo">
                   <div class="shopItemName">${esc(item.item)}</div>
                   ${qty ? `<div class="shopItemQty">${esc(qty)}</div>` : ''}
                   ${item.notes ? `<div class="shopItemNotes">${esc(item.notes)}</div>` : ''}
                 </div>
-                <span class="itemDragHandle"></span>
               </div>`;
           }).join('')}
         </div>
@@ -1003,6 +1014,50 @@ function esc(str) {
 function switchTab(tabId) {
   $$('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tabId));
   $$('.tabContent').forEach(c => c.classList.toggle('active', c.id === tabId + 'Tab'));
+  // Sortable can't measure elements that are inside display:none.
+  // Re-init after the tab becomes visible so hit-detection works correctly.
+  if (tabId === 'shop') requestAnimationFrame(() => initAllSortables());
+}
+
+// ════════════════════════════════════════════════════════════
+// Inline item-name editing (create tab only)
+// ════════════════════════════════════════════════════════════
+function editItemName(span, id) {
+  const original = span.textContent.trim();
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.value = original;
+  input.className = 'itemRowNameEdit';
+  span.replaceWith(input);
+  input.focus();
+  input.select();
+
+  let done = false;
+
+  const commit = () => {
+    if (done) return;
+    done = true;
+    const newName = input.value.trim() || original;
+    input.replaceWith(span);
+    if (newName === original) return;
+    span.textContent = newName;
+    const item = STATE.items.find(i => i.id === id);
+    if (item) item.item = newName;
+    api('updateItem', { id, item: newName });
+    renderShoppingList();
+  };
+
+  const cancel = () => {
+    if (done) return;
+    done = true;
+    input.replaceWith(span);
+  };
+
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Enter')  { e.preventDefault(); commit(); }
+    if (e.key === 'Escape') { e.preventDefault(); cancel(); }
+  });
+  input.addEventListener('blur', commit);
 }
 
 // ════════════════════════════════════════════════════════════
