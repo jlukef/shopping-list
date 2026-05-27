@@ -564,21 +564,32 @@ function highlightAc(items) {
 // ════════════════════════════════════════════════════════════
 // Settings modal
 // ════════════════════════════════════════════════════════════
-async function openSettings() {
-  $('scriptUrlInput').value    = CFG.scriptUrl;
-  $('defaultShopSelect').value = CFG.defaultShop;
-  $('claudeKeyInput').value    = '';  // never pre-fill a key field
-  // Show whether a key is already stored server-side
+function openSettings() {
+  $('scriptUrlInput').value = CFG.scriptUrl;
+  $('claudeKeyInput').value = '';
   $('claudeKeyStatus').textContent = '';
-  if (CFG.scriptUrl) {
-    const res = await apiQ('getApiKeySet');
-    if (res) {
-      $('claudeKeyStatus').textContent = res.set
-        ? `✅ Key set (${res.preview})`
-        : '⚠️ No key saved yet';
-    }
-  }
+  $('setupStatus').textContent     = '';
+
+  // Set default shop select if it's populated; otherwise leave it
+  const defSel = $('defaultShopSelect');
+  if (defSel.options.length) defSel.value = CFG.defaultShop;
+
+  // Show modal immediately — don't await anything first
   $('settingsModal').classList.remove('hidden');
+
+  // Then fetch key status in the background
+  if (CFG.scriptUrl) {
+    $('claudeKeyStatus').textContent = '⏳ Checking…';
+    apiQ('getApiKeySet').then(res => {
+      if (res) {
+        $('claudeKeyStatus').textContent = res.set
+          ? `✅ Key saved (${res.preview})`
+          : '⚠️ No Claude key saved yet';
+      } else {
+        $('claudeKeyStatus').textContent = '';
+      }
+    });
+  }
 }
 
 function closeSettings() {
