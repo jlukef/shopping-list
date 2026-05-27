@@ -906,6 +906,36 @@ a  { color: var(--primary); }
 /* ── Utility ─────────────────────────────────────────────── */
 .hidden { display: none !important; }
 
+/* ── Drag handles & Sortable states ─────────────────────────── */
+/* Dotted borders — the simplest possible approach, zero deps    */
+.dragHandle {
+  display: inline-block;
+  flex-shrink: 0;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  box-sizing: border-box;
+  width: 10px;
+  height: 18px;
+  margin-right: 6px;
+  border-left:  3px dotted var(--txt3);
+  border-right: 3px dotted var(--txt3);
+  opacity: .7;
+  transition: opacity .15s;
+  vertical-align: middle;
+}
+.dragHandle:hover  { opacity: 1; cursor: grab; }
+.dragHandle:active { cursor: grabbing; }
+
+/* Ghost = semi-transparent slot shown while dragging */
+.sortable-ghost { opacity: .35; }
+
+/* Chosen = the card the user is actually holding */
+.sortable-chosen {
+  cursor: grabbing !important;
+  box-shadow: var(--shadow-md);
+}
+
 /* ── View Transitions — shop column animations ───────────── */
 /* Suppress the default full-page crossfade so only the named
    shop columns animate when toggled on/off.                  */

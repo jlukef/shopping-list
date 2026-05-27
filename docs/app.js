@@ -8,6 +8,8 @@
 
 'use strict';
 
+console.log('[ShoppingList] app.js v2 — drag handles build');
+
 // ── Config (persisted in localStorage) ──────────────────────
 const CFG = {
   get scriptUrl()   { return localStorage.getItem('scriptUrl')   || ''; },
@@ -30,6 +32,9 @@ const STATE = {
   acShop:             null,  // which shop's autocomplete is open
   loading:            false,
 };
+
+// ── Sortable instances (keyed so we can destroy on re-render) ─
+const SORTABLES = {};
 
 // ── DOM refs ─────────────────────────────────────────────────
 const $  = id => document.getElementById(id);
@@ -86,6 +91,9 @@ async function loadAll() {
   if (listRes)  STATE.items = listRes.items || [];
   if (shopsRes) STATE.shops = shopsRes.shops || [];
 
+  // Apply saved drag-order before first render
+  applySavedOrder();
+
   // Set default enabled shops (first 3) if nothing saved yet
   if (!STATE.enabledShops.length && STATE.shops.length) {
     const saved = localStorage.getItem('createEnabledShops');
@@ -97,6 +105,42 @@ async function loadAll() {
     }
   }
 
+  renderAll();
+}
+
+/* ── Shop ordering — persisted in localStorage ───────────── */
+function applySavedOrder() {
+  const saved = localStorage.getItem('shopOrder');
+  if (!saved) return;
+  try {
+    const ids = JSON.parse(saved);
+    STATE.shops.sort((a, b) => {
+      const ai = ids.indexOf(a.id);
+      const bi = ids.indexOf(b.id);
+      if (ai === -1 && bi === -1) return 0;
+      if (ai === -1) return 1;   // new shops go to the end
+      if (bi === -1) return -1;
+      return ai - bi;
+    });
+  } catch (e) { /* ignore */ }
+}
+
+function reorderShops(orderedSubsetIds) {
+  // Rearrange STATE.shops so the dragged subset occupies the same index
+  // slots they held before the drag, now in their new order.
+  // Non-dragged shops stay exactly where they were.
+  const subsetSet = new Set(orderedSubsetIds);
+  const slots = [];
+  STATE.shops.forEach((s, i) => { if (subsetSet.has(s.id)) slots.push(i); });
+
+  const newShops = [...STATE.shops];
+  orderedSubsetIds.forEach((id, j) => {
+    const shop = STATE.shops.find(s => s.id === id);
+    if (shop) newShops[slots[j]] = shop;
+  });
+
+  STATE.shops = newShops;
+  localStorage.setItem('shopOrder', JSON.stringify(STATE.shops.map(s => s.id)));
   renderAll();
 }
 
@@ -132,6 +176,7 @@ function renderAll() {
   renderShoppingList();
   renderSettingsShops();
   renderShopFilterChips();
+  initAllSortables();
 }
 
 /* ── Settings selects (no longer used in create tab) ────────── */
@@ -231,23 +276,27 @@ function toggleCreateShop(shopId) {
 
   // Animate columns sliding to their new positions
   if (document.startViewTransition) {
-    document.startViewTransition(() => renderCreateTab());
+    const t = document.startViewTransition(() => renderCreateTab());
+    // Re-init sortables after the new DOM is in place
+    t.finished.then(() => initAllSortables());
   } else {
     renderCreateTab();
+    initAllSortables();
   }
 }
 
 function renderCreateSections() {
   const container = $('createSections');
   if (!container) return;
-  const shopMap = shopColorMap();
+  const enabledSet = new Set(STATE.enabledShops);
 
-  container.innerHTML = STATE.enabledShops.map(shopId => {
-    const shop = shopMap[shopId];
-    if (!shop) return '';
-    const items = STATE.items.filter(i => i.shop === shopId);
-    return renderShopSection(shop, items);
-  }).join('');
+  // Iterate STATE.shops in order so the columns respect the user's drag order
+  container.innerHTML = STATE.shops
+    .filter(s => enabledSet.has(s.id))
+    .map(shop => {
+      const items = STATE.items.filter(i => i.shop === shop.id);
+      return renderShopSection(shop, items);
+    }).join('');
 
   // Wire add-row placeholders
   container.querySelectorAll('.shopAddPlaceholder').forEach(el => {
@@ -292,6 +341,7 @@ function renderShopSection(shop, items) {
     <div class="shopSection" data-shop="${shop.id}"
          style="view-transition-name: shop-${shop.id}">
       <div class="shopSectionHeader" style="border-left:4px solid ${shop.color}">
+        <span class="dragHandle" title="Drag to reorder"></span>
         <span class="shopSectionTitle">${shop.emoji} ${esc(shop.name)}</span>
         ${items.length ? `<span class="shopSectionCount">${items.length}</span>` : ''}
       </div>
@@ -565,6 +615,7 @@ function renderShoppingList() {
     return `
       <div class="shopGroup" data-shop="${shopId}">
         <div class="shopGroupHeader">
+          <span class="dragHandle" title="Drag to reorder"></span>
           <span class="shopGroupTitle">
             <span>${shop.emoji}</span>
             <span>${esc(shop.name)}</span>
@@ -612,6 +663,7 @@ function renderSettingsShops() {
   const list = $('shopsList');
   list.innerHTML = STATE.shops.map(s => `
     <li class="shopManageItem" data-id="${s.id}">
+      <span class="dragHandle" title="Drag to reorder"></span>
       <span class="shopManageEmoji">${s.emoji}</span>
       <span class="shopManageName">${esc(s.name)}</span>
       <span class="shopManageDot" style="background:${s.color}"></span>
@@ -921,6 +973,65 @@ function esc(str) {
 function switchTab(tabId) {
   $$('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tabId));
   $$('.tabContent').forEach(c => c.classList.toggle('active', c.id === tabId + 'Tab'));
+}
+
+// ════════════════════════════════════════════════════════════
+// Drag-and-drop reordering (Sortable.js)
+// ════════════════════════════════════════════════════════════
+function initAllSortables() {
+  if (typeof Sortable === 'undefined') return;
+
+  // Destroy stale instances (DOM nodes they reference are gone after re-render)
+  Object.values(SORTABLES).forEach(s => { try { s.destroy(); } catch (e) {} });
+  Object.keys(SORTABLES).forEach(k => delete SORTABLES[k]);
+
+  const base = {
+    animation:        200,
+    handle:           '.dragHandle',
+    delay:            150,          // ms hold before drag starts
+    delayOnTouchOnly: true,         // instant on mouse, 150 ms hold on touch
+    ghostClass:       'sortable-ghost',
+    chosenClass:      'sortable-chosen',
+  };
+
+  // ── Settings shop list (all shops) ──────────────────────
+  const shopsList = $('shopsList');
+  if (shopsList && shopsList.children.length) {
+    SORTABLES.settings = new Sortable(shopsList, {
+      ...base,
+      onEnd() {
+        const newIds = [...shopsList.querySelectorAll('.shopManageItem')]
+                         .map(el => el.dataset.id);
+        reorderShops(newIds);
+      },
+    });
+  }
+
+  // ── Create tab columns (enabled shops only) ─────────────
+  const createSections = $('createSections');
+  if (createSections && createSections.children.length) {
+    SORTABLES.create = new Sortable(createSections, {
+      ...base,
+      onEnd() {
+        const newIds = [...createSections.querySelectorAll('.shopSection')]
+                         .map(el => el.dataset.shop);
+        reorderShops(newIds);
+      },
+    });
+  }
+
+  // ── Shopping tab groups (shops that have items) ──────────
+  const shoppingList = $('shoppingList');
+  if (shoppingList && shoppingList.children.length) {
+    SORTABLES.shop = new Sortable(shoppingList, {
+      ...base,
+      onEnd() {
+        const newIds = [...shoppingList.querySelectorAll('.shopGroup')]
+                         .map(el => el.dataset.shop);
+        reorderShops(newIds);
+      },
+    });
+  }
 }
 
 // ════════════════════════════════════════════════════════════
