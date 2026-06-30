@@ -399,6 +399,10 @@ If an agent cannot run tests or deploy steps, it should write the test/deploy no
 
 ---
 
+- 2026-06-30 — [Claude] — **Anna's first login hash didn't work; replaced it.** Jamie confirmed his own login succeeded. Anna's first hash failed with the generic "Wrong username or password." Before swapping anything, diagnosed root cause directly: read `/proc/<PID>/environ` on the running `shopping-list` process and confirmed `SHOPPING_LIST_USERS` was loaded **byte-for-byte correct** — ruled out any systemd `EnvironmentFile=`/shell-escaping bug with the `$`-delimited hash format. So the mismatch was a one-off (typo when hashing or entering the password, not a system defect). Jamie sent a freshly regenerated hash for `anna`; replaced just her portion of `SHOPPING_LIST_USERS` via the same `sed` + quoted-heredoc approach, `chmod 600`, restarted the service, and re-verified the new value via `/proc/<PID>/environ` again (exact match) plus `/healthz`. **Open:** Anna to retry login at `https://sharedlist.co.uk`.
+
+---
+
 - 2026-06-30 — [Claude] — **Added Anna's (Jamie's wife) login to production.** Jamie sent the hash directly (his first attempt accidentally included the plaintext password before he interrupted it — flagged this to him; he chose to keep that password rather than rotate it, his call). Appended `anna:<hash>` to `SHOPPING_LIST_USERS` in `/srv/shopping-list/.env` via the same quoted-heredoc/sed approach used for Jamie's entry (verified the `$`-delimited hash wasn't mangled), `chmod 600`, restarted `shopping-list.service`. Verified: service healthy (`/healthz` ok), `/api` still 401 when unauthenticated, and a deliberately wrong password for `anna` correctly returns the same generic "Wrong username or password." with no enumeration difference — confirms the new entry parsed correctly without breaking anything. Did not test a successful login as Anna (same reasoning as Jamie's account — I don't use real plaintext credentials even when one was briefly exposed). **Open:** Anna should confirm her own login works at `https://sharedlist.co.uk`.
 
 ---
