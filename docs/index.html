@@ -9,7 +9,11 @@
   <meta name="apple-mobile-web-app-title" content="Shop List">
   <meta name="theme-color" content="#1a1a2e">
   <title>Shopping List</title>
-  <link rel="manifest" href="manifest.json">
+  <!-- crossorigin="use-credentials" is required: <link rel="manifest"> fetches
+       omit cookies by default, and every docs/ asset here requires login, so
+       without this Chrome silently gets redirected to /login instead of the
+       real manifest and never offers "Install app" / "Add to Home screen". -->
+  <link rel="manifest" href="manifest.json" crossorigin="use-credentials">
   <link rel="icon" href="icons/icon-192.png">
   <link rel="apple-touch-icon" href="icons/icon-192.png">
   <link rel="stylesheet" href="style.css">
