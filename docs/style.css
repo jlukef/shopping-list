@@ -355,6 +355,7 @@ a  { color: var(--primary); }
   display: inline-flex;
   align-items: center;
   gap: 5px;
+  white-space: nowrap;          /* keep long shop names (e.g. "Fruit and Veg Shop") on one line; chip wraps as a unit */
   padding: 6px 13px;
   border-radius: 20px;
   border: 1.5px solid var(--border);
@@ -560,6 +561,286 @@ a  { color: var(--primary); }
 }
 .emptyIcon { font-size: 3rem; margin-bottom: 12px; }
 .emptyState p { font-size: .95rem; line-height: 1.6; }
+.emptyState .actionBtn { margin-top: 18px; }
+.emptyState .actionBtn[disabled] { opacity: .5; cursor: default; }
+.emptyState .actionBtn[disabled]:hover {
+  background: var(--primary); border-color: var(--primary);
+}
+.comingSoon { margin-top: 12px; font-style: italic; }
+
+/* ── Segmented control (Receipts / History) ──────────────── */
+.segmentedControl {
+  display: flex;
+  gap: 3px;
+  padding: 3px;
+  margin-bottom: 16px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+.segment {
+  flex: 1;
+  background: none;
+  border: none;
+  padding: 9px 12px;
+  font-size: .92rem;
+  font-weight: 600;
+  color: var(--txt2);
+  border-radius: calc(var(--radius-sm) - 3px);
+  transition: background .15s, color .15s;
+}
+.segment.active {
+  background: var(--surface);
+  color: var(--primary);
+  box-shadow: var(--shadow-sm);
+}
+.segmentView { display: none; }
+.segmentView.active { display: block; }
+
+/* Legacy/admin tag for settings sections being phased out */
+.legacyTag {
+  font-size: .68rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .4px;
+  color: var(--txt2);
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 2px 8px;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+
+/* Legacy/static-only settings (Apps Script URL, server AI key) are hidden in
+   hosted mode, which uses the /api backend and local sorting. JS sets body.hosted. */
+body.hosted .legacyOnly { display: none; }
+
+/* ── Receipts scaffold (placeholder for the future upload flow) ── */
+.receiptScaffold {
+  text-align: center;
+  padding: 32px 20px 40px;
+  color: var(--txt2);
+}
+.scaffoldTitle { font-size: 1.1rem; font-weight: 700; color: var(--txt); margin: 6px 0; }
+.scaffoldLead  { font-size: .95rem; line-height: 1.55; max-width: 30rem; margin: 0 auto 22px; }
+
+.receiptUploadActions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: 22rem;
+  margin: 0 auto;
+}
+.receiptUploadActions .actionBtn { flex: none; padding: 12px 16px; font-size: .95rem; }
+.receiptUploadActions .actionBtn[disabled] { opacity: .5; cursor: default; }
+.receiptUploadActions .actionBtn[disabled]:hover {
+  background: var(--primary); border-color: var(--primary); color: #fff;
+}
+.receiptUploadActions .actionBtn.secondary[disabled]:hover {
+  background: transparent; color: var(--primary);
+}
+
+/* Receipt lifecycle stepper: upload → review → save */
+.lifecycle {
+  list-style: none;
+  text-align: left;
+  max-width: 24rem;
+  margin: 28px auto 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.lifecycleStep { display: flex; align-items: flex-start; gap: 12px; }
+.lifecycleStep strong { color: var(--txt); font-size: .95rem; }
+.lifecycleNum {
+  flex: none;
+  width: 26px; height: 26px;
+  border-radius: 50%;
+  background: var(--primary);
+  color: #fff;
+  font-size: .85rem; font-weight: 700;
+  display: flex; align-items: center; justify-content: center;
+}
+
+/* ── Suggestions strip (List tab) — placement scaffold, hidden until ready ── */
+.suggestionsStrip {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+  padding: 12px 14px;
+  margin-bottom: 12px;
+}
+.suggestionsStrip.hidden { display: none; }
+.suggestionsHead {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 8px;
+}
+.suggestionsLabel { font-size: .85rem; font-weight: 700; color: var(--txt); }
+.suggestionsChips { display: flex; flex-wrap: wrap; gap: 8px; }
+
+/* Suggestion chip (structure the prediction backend will render) */
+.suggestionChip {
+  display: inline-flex; align-items: center; gap: 8px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 6px 10px;
+}
+.sugAdd, .sugDismiss {
+  flex: none;
+  width: 24px; height: 24px;
+  border-radius: 50%;
+  border: none;
+  font-size: .9rem;
+  display: flex; align-items: center; justify-content: center;
+}
+.sugAdd      { background: var(--primary); color: #fff; }
+.sugDismiss  { background: none; color: var(--txt3); }
+.sugBody     { display: flex; flex-direction: column; line-height: 1.25; }
+.sugName     { font-size: .85rem; font-weight: 600; color: var(--txt); }
+.sugWhy      { font-size: .72rem; color: var(--txt2); }
+
+/* "Show example layout" toggle that reveals the inert previews below */
+.previewToggle {
+  display: block;
+  margin: 20px auto 0;
+  padding: 7px 16px;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--txt2);
+  font-size: .82rem;
+  font-weight: 600;
+}
+.previewToggle:hover { background: var(--surface2); color: var(--txt); }
+
+/* ── Inert scaffold previews (review + history skeletons) ─── */
+.scaffoldPreview {
+  margin-top: 8px;
+  padding-top: 20px;
+  border-top: 1px dashed var(--border);
+  opacity: .9;
+}
+.scaffoldPreview button[disabled],
+.scaffoldPreview input[disabled] { cursor: default; }
+.scaffoldPreview .actionBtn[disabled] { opacity: .55; }
+.scaffoldPreview .actionBtn[disabled]:hover {
+  background: var(--primary); border-color: var(--primary); color: #fff;
+}
+.scaffoldPreview .actionBtn.secondary[disabled]:hover {
+  background: transparent; color: var(--primary);
+}
+
+.previewBar { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; }
+.previewTag {
+  font-size: .68rem; font-weight: 700; text-transform: uppercase; letter-spacing: .4px;
+  color: var(--primary);
+  background: rgba(26,115,232,.1);
+  border-radius: 999px;
+  padding: 2px 8px;
+}
+
+/* Status copy chips */
+.statusLegend { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 14px; }
+.statusChip {
+  font-size: .72rem; font-weight: 600;
+  border-radius: 999px; padding: 3px 9px;
+  border: 1px solid transparent;
+}
+.status-uploading  { background: var(--surface2); color: var(--txt2); border-color: var(--border); }
+.status-processing { background: #fff3e0; color: var(--orange); }
+.status-ready      { background: var(--green-lt); color: var(--green); }
+.status-error      { background: var(--red-lt); color: var(--red); }
+
+/* Review card skeleton */
+.reviewCard {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+  padding: 14px;
+}
+.reviewHead {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 10px; flex-wrap: wrap;
+  padding-bottom: 12px; margin-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+.reviewHeadFields { display: flex; gap: 8px; flex-wrap: wrap; }
+.reviewCount { font-size: .82rem; font-weight: 600; color: var(--txt2); white-space: nowrap; }
+.reviewInput {
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 7px 9px;
+  font-size: .85rem;
+  background: var(--surface2);
+  color: var(--txt);
+  max-width: 9rem;
+}
+.reviewInput.grow  { flex: 1; min-width: 6rem; max-width: none; }
+.reviewInput.qty   { width: 46px; text-align: center; }
+.reviewInput.price { width: 64px; }
+
+.photoPanel {
+  width: 100%;
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 12px; margin-bottom: 12px;
+  background: var(--surface2);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-sm);
+  text-align: left;
+}
+.photoPanelIcon { font-size: 1.3rem; }
+
+.reviewRows { display: flex; flex-direction: column; gap: 8px; }
+.reviewRow  { display: flex; align-items: center; gap: 8px; }
+.confDot    { flex: none; width: 9px; height: 9px; border-radius: 50%; }
+.conf-ok    { background: var(--green); }
+.conf-low   { background: var(--orange); }
+.rowDel {
+  flex: none; width: 28px; height: 28px;
+  border: none; background: none; color: var(--red);
+  border-radius: var(--radius-sm); font-size: .9rem;
+}
+
+.reviewAddRow {
+  width: 100%; margin-top: 10px;
+  padding: 9px; border: 1.5px dashed var(--border); border-radius: var(--radius-sm);
+  background: none; color: var(--primary); font-weight: 600; font-size: .85rem;
+}
+.excludedNote { margin-top: 10px; font-style: italic; }
+.reviewFooter { display: flex; gap: 10px; margin-top: 14px; }
+.reviewFooter .actionBtn { flex: 1; }
+
+/* History trip-group skeleton */
+.tripCard {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+  margin-bottom: 10px;
+  overflow: hidden;
+}
+.tripHead {
+  width: 100%;
+  display: flex; align-items: center; gap: 10px;
+  padding: 12px 14px;
+  background: none; text-align: left;
+}
+.tripEmoji   { font-size: 1.1rem; flex: none; }
+.tripMeta    { flex: 1; font-size: .9rem; color: var(--txt); }
+.tripTotal   { font-weight: 700; color: var(--txt); }
+.tripChevron { color: var(--txt2); width: 1rem; text-align: center; }
+.tripItems   { border-top: 1px solid var(--border); padding: 4px 14px 10px; }
+.tripItem {
+  display: flex; justify-content: space-between; gap: 10px;
+  padding: 7px 0; font-size: .88rem;
+  border-bottom: 1px solid var(--surface2);
+}
+.tripItem:last-child { border-bottom: none; }
+.tripItem.more { justify-content: flex-start; font-style: italic; }
 
 /* ── Shopping tab ────────────────────────────────────────── */
 .shopToolbar {
@@ -591,6 +872,7 @@ a  { color: var(--primary); }
   display: inline-flex;
   align-items: center;
   gap: 4px;
+  white-space: nowrap;          /* long shop filter names stay one line; chip wraps as a unit */
   padding: 5px 11px;
   border-radius: 20px;
   font-size: .8rem;

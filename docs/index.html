@@ -18,6 +18,9 @@
     <div class="headerActions">
       <button id="refreshBtn" class="iconBtn" title="Refresh list">↻</button>
       <button id="settingsBtn" class="iconBtn" title="Settings">⚙</button>
+      <!-- Shown only when served by the FastAPI host (sharedlist.co.uk / 127.0.0.1:8770);
+           hidden in legacy GitHub Pages mode. Revealed by app.js. -->
+      <button id="logoutBtn" class="iconBtn hidden" title="Log out">🚪</button>
     </div>
   </header>
 
@@ -31,6 +34,10 @@
       <span class="tabIcon">🛍️</span>
       <span class="tabLabel">Shopping</span>
     </button>
+    <button class="tab" data-tab="receipts">
+      <span class="tabIcon">🧾</span>
+      <span class="tabLabel">Receipts</span>
+    </button>
   </nav>
 
   <!-- ── Toast ───────────────────────────────────────────── -->
@@ -40,6 +47,28 @@
        TAB 1 — List Creation
   ══════════════════════════════════════════════════════════ -->
   <div id="createTab" class="tabContent active">
+
+    <!-- Suggestions strip — placement/copy scaffold only. Hidden until the
+         prediction backend exists; #suggestionsChips is never populated with
+         fake suggestions. The chip structure the backend should render is kept
+         below as an inert template comment (item name + "why" + add/dismiss):
+
+         <div class="suggestionChip">
+           <button class="sugAdd" type="button" aria-label="Add to list">+</button>
+           <span class="sugBody">
+             <span class="sugName">Milk</span>
+             <span class="sugWhy">usually every ~5 days · last bought 6 days ago</span>
+           </span>
+           <button class="sugDismiss" type="button" aria-label="Dismiss suggestion">✕</button>
+         </div>
+    -->
+    <div id="suggestionsStrip" class="suggestionsStrip hidden" aria-live="polite">
+      <div class="suggestionsHead">
+        <span class="suggestionsLabel">💡 Suggestions</span>
+        <button id="suggestionsDismiss" class="dangerLinkBtn" type="button">Hide</button>
+      </div>
+      <div id="suggestionsChips" class="suggestionsChips"></div>
+    </div>
 
     <!-- Shop toggle chips + meta bar -->
     <div class="createHeader">
@@ -84,9 +113,167 @@
     <div id="shoppingList" class="shoppingList"></div>
 
     <div id="emptyShop" class="emptyState hidden">
-      <div class="emptyIcon">✅</div>
-      <p>All done!<br>Tap "Clear bought" to reset.</p>
+      <div class="emptyIcon">🛒</div>
+      <p>Nothing to shop yet.<br>Add items in the <strong>List</strong> tab to get started.</p>
     </div>
+  </div>
+
+  <!-- ════════════════════════════════════════════════════════
+       TAB 3 — Receipts / History  (UI scaffolding only — no backend yet)
+  ══════════════════════════════════════════════════════════ -->
+  <div id="receiptsTab" class="tabContent">
+
+    <div class="segmentedControl" role="tablist" aria-label="Receipts and history">
+      <button class="segment active" data-segment="receiptsView" role="tab" aria-selected="true">Receipts</button>
+      <button class="segment" data-segment="historyView" role="tab" aria-selected="false">History</button>
+    </div>
+
+    <!-- Receipts segment — scaffold/copy only; upload is not wired up yet -->
+    <div id="receiptsView" class="segmentView active" role="tabpanel">
+      <div class="receiptScaffold">
+        <div class="emptyIcon">🧾</div>
+        <h3 class="scaffoldTitle">No receipts yet</h3>
+        <p class="scaffoldLead">
+          Snap a photo of your shop receipt and we'll turn it into shopping history.
+        </p>
+
+        <div class="receiptUploadActions">
+          <button class="actionBtn" disabled>📷 Take photo</button>
+          <button class="actionBtn secondary" disabled>🖼️ Choose from library</button>
+        </div>
+        <p class="hint comingSoon">Coming soon — uploading isn't wired up yet.</p>
+
+        <ol class="lifecycle" aria-label="How receipts will work">
+          <li class="lifecycleStep">
+            <span class="lifecycleNum">1</span>
+            <div><strong>Upload</strong><br>
+              <span class="hint">Photograph or pick a receipt image.</span></div>
+          </li>
+          <li class="lifecycleStep">
+            <span class="lifecycleNum">2</span>
+            <div><strong>Review</strong><br>
+              <span class="hint">Check and fix the extracted items before anything is saved.</span></div>
+          </li>
+          <li class="lifecycleStep">
+            <span class="lifecycleNum">3</span>
+            <div><strong>Save to history</strong><br>
+              <span class="hint">Accepted items become your shopping history.</span></div>
+          </li>
+        </ol>
+      </div>
+
+      <!-- Preview of the future review screen. Hidden by default behind a toggle so
+           the example layout never clutters real use. Inert/disabled skeleton — the
+           rows are clearly-labelled EXAMPLE layout, not real or saved data. -->
+      <button class="previewToggle" type="button" aria-expanded="false">Show example layout</button>
+      <div class="scaffoldPreview hidden" aria-hidden="true">
+        <div class="previewBar">
+          <span class="previewTag">Preview</span>
+          <span class="hint">Example layout of the review screen — no real data yet.</span>
+        </div>
+
+        <!-- Status copy states the user will see during the lifecycle -->
+        <div class="statusLegend">
+          <span class="statusChip status-uploading">Uploading…</span>
+          <span class="statusChip status-processing">Processing…</span>
+          <span class="statusChip status-ready">Ready to review</span>
+          <span class="statusChip status-error">Couldn't read this receipt</span>
+        </div>
+
+        <div class="reviewCard">
+          <div class="reviewHead">
+            <div class="reviewHeadFields">
+              <input class="reviewInput" value="Morrisons" disabled aria-label="Shop (example)">
+              <input class="reviewInput" value="14 Jun 2026" disabled aria-label="Date (example)">
+            </div>
+            <span class="reviewCount">3 items · £6.04</span>
+          </div>
+
+          <button class="photoPanel" type="button" disabled>
+            <span class="photoPanelIcon">🧾</span>
+            <span class="hint">View original photo — cross-check against the paper receipt</span>
+          </button>
+
+          <ul class="reviewRows">
+            <li class="reviewRow">
+              <span class="confDot conf-ok" title="High confidence"></span>
+              <input class="reviewInput grow" value="Semi-skimmed milk 2.27L" disabled aria-label="Item name (example)">
+              <input class="reviewInput qty" value="1" disabled aria-label="Quantity (example)">
+              <input class="reviewInput price" value="£1.45" disabled aria-label="Price (example)">
+              <button class="rowDel" type="button" disabled aria-label="Remove row">✕</button>
+            </li>
+            <li class="reviewRow">
+              <span class="confDot conf-low" title="Low confidence — check this"></span>
+              <input class="reviewInput grow" value="Chedar cheese 400g" disabled aria-label="Item name (example)">
+              <input class="reviewInput qty" value="1" disabled aria-label="Quantity (example)">
+              <input class="reviewInput price" value="£3.10" disabled aria-label="Price (example)">
+              <button class="rowDel" type="button" disabled aria-label="Remove row">✕</button>
+            </li>
+            <li class="reviewRow">
+              <span class="confDot conf-ok" title="High confidence"></span>
+              <input class="reviewInput grow" value="Bananas loose" disabled aria-label="Item name (example)">
+              <input class="reviewInput qty" value="6" disabled aria-label="Quantity (example)">
+              <input class="reviewInput price" value="£0.84" disabled aria-label="Price (example)">
+              <button class="rowDel" type="button" disabled aria-label="Remove row">✕</button>
+            </li>
+          </ul>
+
+          <button class="reviewAddRow" type="button" disabled>+ Add item</button>
+          <p class="hint excludedNote">2 lines hidden as offers / totals / points — tap to review</p>
+
+          <div class="reviewFooter">
+            <button class="actionBtn secondary" type="button" disabled>Discard</button>
+            <button class="actionBtn" type="button" disabled>Save 3 items to history</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- History segment -->
+    <div id="historyView" class="segmentView" role="tabpanel">
+      <div class="emptyState">
+        <div class="emptyIcon">🕘</div>
+        <p>
+          No history view yet. Items you mark as <strong>bought</strong> are already being recorded —
+          a trip-grouped view to browse them here is coming soon.
+        </p>
+      </div>
+
+      <!-- Preview of the future trip-grouped history. Hidden by default behind a toggle
+           so the example layout never clutters real use. Inert/disabled skeleton —
+           clearly-labelled EXAMPLE layout, not real or saved data. -->
+      <button class="previewToggle" type="button" aria-expanded="false">Show example layout</button>
+      <div class="scaffoldPreview hidden" aria-hidden="true">
+        <div class="previewBar">
+          <span class="previewTag">Preview</span>
+          <span class="hint">Example layout — history will group by shopping trip. No real data yet.</span>
+        </div>
+
+        <div class="tripCard">
+          <button class="tripHead" type="button" disabled>
+            <span class="tripEmoji">🛒</span>
+            <span class="tripMeta"><strong>Lidl</strong> · 14 Jun · 23 items</span>
+            <span class="tripTotal">£52.10</span>
+            <span class="tripChevron">⌄</span>
+          </button>
+          <ul class="tripItems">
+            <li class="tripItem"><span>Semi-skimmed milk 2.27L</span><span class="hint">£1.45</span></li>
+            <li class="tripItem"><span>Cheddar cheese 400g</span><span class="hint">£3.10</span></li>
+            <li class="tripItem more hint">+ 21 more items…</li>
+          </ul>
+        </div>
+
+        <div class="tripCard">
+          <button class="tripHead collapsed" type="button" disabled>
+            <span class="tripEmoji">🛒</span>
+            <span class="tripMeta"><strong>Aldi</strong> · 9 Jun · 11 items</span>
+            <span class="tripTotal">£18.73</span>
+            <span class="tripChevron">›</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
   </div>
 
   <!-- ════════════════════════════════════════════════════════
@@ -101,9 +288,16 @@
       </div>
       <div class="modalBody">
 
-        <section class="settingSection">
-          <h3>Apps Script URL</h3>
-          <p class="hint">Paste the web app URL after you deploy the script.</p>
+        <!-- Legacy/static-mode only. Hidden in hosted mode (body.hosted) — the
+             hosted app uses its own /api backend and local sorting. -->
+        <section class="settingSection legacyOnly">
+          <h3>Apps Script URL <span class="legacyTag">legacy / admin</span></h3>
+          <p class="hint">
+            When the app is hosted on <code>sharedlist.co.uk</code> it talks to its own
+            <code>/api</code> backend automatically — you don't need to paste anything here.
+            This override is only for the legacy Google Apps Script backend or for testing
+            a different server.
+          </p>
           <input id="scriptUrlInput" type="url" placeholder="https://script.google.com/macros/s/…/exec" class="fullInput">
           <div class="btnRow">
             <button id="testConnectionBtn" class="pill">Test connection</button>
@@ -112,7 +306,7 @@
           <p id="setupStatus" class="hint" style="margin-top:8px"></p>
         </section>
 
-        <section class="settingSection">
+        <section class="settingSection legacyOnly">
           <h3>Claude API Key</h3>
           <p class="hint">
             Used for AI aisle-order sorting. Stored securely in Google Apps Script —

@@ -11,12 +11,34 @@
 console.log('[ShoppingList] app.js v2 — drag handles build');
 
 // ── Config (persisted in localStorage) ──────────────────────
+// True when the page is being served by the FastAPI host (sharedlist.co.uk or
+// the local 127.0.0.1:8770 / localhost:8770 dev port) rather than from legacy
+// GitHub Pages or a plain static preview server.
+// Used to default the API to same-origin /api and to reveal the logout button.
+function isHostedMode() {
+  const host = location.hostname.toLowerCase();
+  return (
+    host === 'sharedlist.co.uk' ||
+    host === 'www.sharedlist.co.uk' ||
+    ((host === '127.0.0.1' || host === 'localhost') && location.port === '8770')
+  );
+}
+
+const DEFAULT_API_URL = isHostedMode() ? '/api' : '';
+
 const CFG = {
   get scriptUrl()   { return localStorage.getItem('scriptUrl')   || ''; },
-  get defaultShop() { return localStorage.getItem('defaultShop') || 'tesco'; },
+  // Hosted mode must always use the authenticated same-origin backend. A stale
+  // legacy Apps Script URL in localStorage must never bypass /api.
+  get apiUrl()      { return DEFAULT_API_URL || this.scriptUrl; },
+  get defaultShop() { return localStorage.getItem('defaultShop') || 'morrisons'; },
   set scriptUrl(v)  { localStorage.setItem('scriptUrl',   v); },
   set defaultShop(v){ localStorage.setItem('defaultShop', v); },
 };
+
+function apiConfigured() {
+  return Boolean(CFG.apiUrl);
+}
 
 // ── Application state ────────────────────────────────────────
 const STATE = {
@@ -42,7 +64,7 @@ const $$ = sel => document.querySelectorAll(sel);
 
 // ── API helper ───────────────────────────────────────────────
 async function api(action, data = {}) {
-  const url = CFG.scriptUrl;
+  const url = CFG.apiUrl;
   if (!url) {
     toast('Set the Apps Script URL in ⚙ Settings first', 'warn');
     return null;
@@ -98,7 +120,10 @@ async function loadAll() {
   if (!STATE.enabledShops.length && STATE.shops.length) {
     const saved = localStorage.getItem('createEnabledShops');
     if (saved) {
-      try { STATE.enabledShops = JSON.parse(saved); } catch (e) {}
+      try {
+        const validIds = new Set(STATE.shops.map(s => s.id));
+        STATE.enabledShops = JSON.parse(saved).filter(id => validIds.has(id));
+      } catch (e) {}
     }
     if (!STATE.enabledShops.length) {
       STATE.enabledShops = STATE.shops.slice(0, 3).map(s => s.id);
@@ -176,7 +201,7 @@ async function loadLayouts(shopId) {
 
 // Override api() for query params that aren't in `data`
 async function apiQ(action, queryExtra = {}) {
-  const url = CFG.scriptUrl;
+  const url = CFG.apiUrl;
   if (!url) { toast('Set the Apps Script URL in ⚙ Settings first', 'warn'); return null; }
   try {
     const params = new URLSearchParams({ action, ...queryExtra });
@@ -208,7 +233,8 @@ function renderSettingSelects() {
   const shops = STATE.shops;
   const defSel = $('defaultShopSelect');
   if (defSel) {
-    const cur = defSel.value || CFG.defaultShop;
+    const requested = defSel.value || CFG.defaultShop;
+    const cur = shops.some(s => s.id === requested) ? requested : shops[0]?.id;
     defSel.innerHTML = shops.map(s =>
       `<option value="${s.id}" ${s.id === cur ? 'selected' : ''}>${s.emoji} ${s.name}</option>`
     ).join('');
@@ -548,7 +574,7 @@ function commitAdd(shopId) {
 async function fetchAddAc(shopId) {
   const inp = $(`addInput_${shopId}`);
   const q   = inp?.value.trim();
-  if (!q || !CFG.scriptUrl) { hideAddAc(shopId); return; }
+  if (!q || !apiConfigured()) { hideAddAc(shopId); return; }
   const res = await apiQ('getAutocomplete', { q });
   if (!res || !res.items.length) { hideAddAc(shopId); return; }
   showAddAc(shopId, res.items);
@@ -892,8 +918,9 @@ function openSettings() {
   // Show modal immediately — don't await anything first
   $('settingsModal').classList.remove('hidden');
 
-  // Then fetch key status in the background
-  if (CFG.scriptUrl) {
+  // Then fetch key status in the background (legacy mode only — the AI-key
+  // section is hidden in hosted mode, which uses local sorting).
+  if (apiConfigured() && !isHostedMode()) {
     $('claudeKeyStatus').textContent = '⏳ Checking…';
     apiQ('getApiKeySet').then(res => {
       if (res) {
@@ -918,7 +945,7 @@ async function saveSettings() {
 
   // Save Claude API key to Script Properties if one was entered
   const claudeKey = $('claudeKeyInput').value.trim();
-  if (claudeKey && url) {
+  if (claudeKey && apiConfigured()) {
     const keyRes = await api('saveApiKey', { claudeKey });
     if (keyRes) {
       $('claudeKeyStatus').textContent = '✅ Key saved to server';
@@ -928,12 +955,11 @@ async function saveSettings() {
 
   closeSettings();
   toast('Settings saved ✓', 'success');
-  if (CFG.scriptUrl) loadAll();
+  if (apiConfigured()) loadAll();
 }
 
 async function testConnection() {
   const url = $('scriptUrlInput').value.trim();
-  if (!url) { toast('Enter a URL first', 'warn'); return; }
   const old = CFG.scriptUrl;
   CFG.scriptUrl = url;
   const res = await api('getShops');
@@ -943,7 +969,6 @@ async function testConnection() {
 
 async function runSetup() {
   const url = $('scriptUrlInput').value.trim();
-  if (!url) { toast('Enter a URL first', 'warn'); return; }
   const btn = $('runSetupBtn');
   btn.disabled    = true;
   btn.textContent = 'Setting up…';
@@ -1017,6 +1042,16 @@ function switchTab(tabId) {
   // Sortable can't measure elements that are inside display:none.
   // Re-init after the tab becomes visible so hit-detection works correctly.
   if (tabId === 'shop') requestAnimationFrame(() => initAllSortables());
+}
+
+// Receipts tab — [Receipts | History] segmented control (client-side only).
+function switchSegment(viewId) {
+  $$('.segment').forEach(s => {
+    const on = s.dataset.segment === viewId;
+    s.classList.toggle('active', on);
+    s.setAttribute('aria-selected', on ? 'true' : 'false');
+  });
+  $$('.segmentView').forEach(v => v.classList.toggle('active', v.id === viewId));
 }
 
 // ════════════════════════════════════════════════════════════
@@ -1158,11 +1193,43 @@ function initAllSortables() {
 // Event wiring
 // ════════════════════════════════════════════════════════════
 function wire() {
+  // Hosted vs legacy/static mode. CSS uses body.hosted to hide legacy-only
+  // controls (Apps Script URL, server AI key) that don't apply to the /api backend.
+  document.body.classList.toggle('hosted', isHostedMode());
+
   // Tabs
   $$('.tab').forEach(tab => tab.addEventListener('click', () => switchTab(tab.dataset.tab)));
 
   // Header buttons
   $('refreshBtn').addEventListener('click', loadAll);
+
+  // Logout — only meaningful (and only shown) when served by the FastAPI host.
+  // Hidden by default in the markup so it never appears in legacy GitHub Pages mode.
+  const logoutBtn = $('logoutBtn');
+  if (logoutBtn && isHostedMode()) {
+    logoutBtn.classList.remove('hidden');
+    logoutBtn.addEventListener('click', () => { window.location.assign('/logout'); });
+  }
+
+  // Receipts tab segmented control
+  $$('.segment').forEach(seg =>
+    seg.addEventListener('click', () => switchSegment(seg.dataset.segment)));
+
+  // Suggestions strip (scaffold) — Hide just collapses it for now.
+  const sugDismiss = $('suggestionsDismiss');
+  if (sugDismiss) {
+    sugDismiss.addEventListener('click', () => $('suggestionsStrip').classList.add('hidden'));
+  }
+
+  // Receipts/History "Show example layout" toggles — reveal the inert preview skeleton.
+  $$('.previewToggle').forEach(btn => btn.addEventListener('click', () => {
+    const preview = btn.nextElementSibling;
+    const show = preview.classList.contains('hidden');
+    preview.classList.toggle('hidden', !show);
+    preview.setAttribute('aria-hidden', show ? 'false' : 'true');
+    btn.setAttribute('aria-expanded', show ? 'true' : 'false');
+    btn.textContent = show ? 'Hide example layout' : 'Show example layout';
+  }));
 
   // List management
   $('clearListBtn').addEventListener('click', clearList);
@@ -1197,10 +1264,10 @@ function wire() {
 // ════════════════════════════════════════════════════════════
 document.addEventListener('DOMContentLoaded', () => {
   wire();
-  if (CFG.scriptUrl) {
+  if (apiConfigured()) {
     loadAll();
   } else {
-    toast('Welcome! Open ⚙ Settings to connect your Google Sheet.', 'info');
+    toast('Welcome! Open ⚙ Settings to connect a backend.', 'info');
     renderAll(); // render empty state
   }
 });

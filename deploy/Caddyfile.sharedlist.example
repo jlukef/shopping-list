@@ -1,0 +1,18 @@
+# Example Caddy site block for sharedlist.co.uk.
+#
+# This is an example only. Do not paste blindly over the live Caddyfile. Merge
+# carefully with /etc/caddy/Caddyfile on ledgerhouse when Jamie approves deploy.
+
+sharedlist.co.uk, www.sharedlist.co.uk {
+	encode zstd gzip
+
+	header {
+		X-Robots-Tag "noindex, nofollow, noarchive"
+	}
+
+	respond /robots.txt "User-agent: *\nDisallow: /\n" 200 {
+		header Content-Type text/plain
+	}
+
+	reverse_proxy 127.0.0.1:8770
+}

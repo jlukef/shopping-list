@@ -1,0 +1,37 @@
+# Example systemd unit for sharedlist.co.uk.
+#
+# Copy to /etc/systemd/system/shopping-list.service on ledgerhouse only when
+# Jamie approves deployment. This file is documentation/example only; it has
+# not been installed or run.
+#
+# Production rules:
+# - Keep this app separate from /srv/tax-app and viour.co.uk.
+# - Use /srv/shopping-list with its own .venv, .env, data directory, and service.
+# - Bind Uvicorn to 127.0.0.1:8770 only; Caddy is the public HTTPS front door.
+# - Do not store secrets in this unit file. Put runtime values in
+#   /srv/shopping-list/.env with restrictive permissions.
+
+[Unit]
+Description=Shopping List FastAPI app for sharedlist.co.uk
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=jamie
+Group=jamie
+WorkingDirectory=/srv/shopping-list
+EnvironmentFile=/srv/shopping-list/.env
+ExecStart=/srv/shopping-list/.venv/bin/python -m uvicorn src.shopping_list.app:app --host 127.0.0.1 --port 8770
+Restart=on-failure
+RestartSec=5
+
+# Basic hardening. Keep these conservative until the first real deployment has
+# been tested; uploads/session DBs still need write access under /srv/shopping-list.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ReadWritePaths=/srv/shopping-list
+
+[Install]
+WantedBy=multi-user.target

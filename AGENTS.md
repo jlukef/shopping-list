@@ -1,10 +1,10 @@
-# Shopping List Web App — Claude Instructions
+# Shopping List Web App — Codex Instructions
 
 ## Project overview
 
-Mobile-first shopping list PWA. It began as GitHub Pages plus Google Apps Script/Sheets. The local
-FastAPI app now has a clean-start SQLite action backend while retaining Apps Script only as an
-explicit fallback. No frontend build step—plain HTML/CSS/JS.
+Mobile-first shopping list PWA migrating from GitHub Pages + Apps Script to a VPS-hosted
+Python/FastAPI app. The app listens on `127.0.0.1:8770`; local batch-4 work now includes a clean-start
+SQLite action backend, with Apps Script retained only as an explicit fallback.
 
 ```
 docs/           → GitHub Pages frontend (index.html, style.css, app.js)
@@ -119,8 +119,8 @@ Apps Script redirects POST requests in a way that breaks CORS. Every mutation (a
 - `api(action, data)` — encodes `data` as `?data=JSON`
 - `apiQ(action, queryExtra)` — passes extra params directly in the query string (used for reads that need simple params like `?shop=tesco`)
 
-### Claude API key lives server-side only
-The key is stored in Apps Script Script Properties (`PropertiesService.getScriptProperties()`), set via the `saveApiKey` action. It is **never** sent to the browser or stored in `localStorage`. The frontend sends `sortList` to Apps Script, which calls the Claude API server-side and returns sorted items.
+### Codex API key lives server-side only
+The key is stored in Apps Script Script Properties (`PropertiesService.getScriptProperties()`), set via the `saveApiKey` action. It is **never** sent to the browser or stored in `localStorage`. The frontend sends `sortList` to Apps Script, which calls the Codex API server-side and returns sorted items.
 
 ### Optimistic UI
 `commitAdd(shopId)` inserts the new item directly into the DOM before the API call returns. A spinning `.savingDot` replaces the delete button while saving; on success the dot swaps for the real delete button with the server-assigned ID. On failure the item is removed and an error toast shown.
@@ -164,8 +164,8 @@ for the current seed (Morrisons, Aldi, Lidl, Butcher, Fruit and Veg Shop, Boots/
 | `addShop` / `deleteShop` | ✓ | Shops management |
 | `getLayouts` | — | `?shop=id` |
 | `saveLayout` | ✓ | Saves aisle order for a shop |
-| `sortList` | ✓ | Calls Claude API server-side; falls back to keyword sort |
-| `saveApiKey` | ✓ | Stores Claude key in Script Properties |
+| `sortList` | ✓ | Calls Codex API server-side; falls back to keyword sort |
+| `saveApiKey` | ✓ | Stores Codex key in Script Properties |
 | `getApiKeySet` | — | Returns `{set: bool, preview: "sk-ant-…xx"}` |
 
 ## Frontend state (`STATE` object in app.js)
@@ -184,7 +184,7 @@ STATE = {
 ```
 
 `localStorage` keys:
-- `scriptUrl` — Apps Script web app URL (legacy/static mode override; hosted mode defaults to `/api`)
+- `scriptUrl` — Apps Script web app URL (Legacy mode only. Hosted mode defaults to `/api`)
 - `defaultShop` — selected default shop ID
 - `createEnabledShops` — JSON array of enabled shop IDs
 - `shopOrder` — JSON array of all shop IDs in user's drag order
@@ -222,7 +222,7 @@ STATE = {
 
 **Layouts:** Tesco (24 departments), Aldi (12 departments)
 
-## Claude API (sorting)
+## Codex API (sorting)
 
-Model: `claude-haiku-4-5-20251001`  
+Model: `Codex-haiku-4-5-20251001`  
 Called from Apps Script via `UrlFetchApp.fetch`. Key in Script Properties under `CLAUDE_API_KEY`. If the key is absent or the API call fails, `sortByKeywords()` is used as a fallback (matches item names against the shop's `StoreLayouts` keywords).
