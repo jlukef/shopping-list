@@ -10,6 +10,30 @@ Read this file and `BACKEND_MIGRATION_PLAN.md` before starting any assigned work
 
 Jamie can simply tell any model: **"See `COLLAB-LOG.md` for instructions."** The model should read this file and `BACKEND_MIGRATION_PLAN.md`, identify its own lane below, stay in that lane, avoid committing/pushing unless Jamie explicitly asks, and add a newest-first entry to this log when done.
 
+## 2026-07-01 — [Codex/GPT] Receipt extraction changed from transcription to purchase records
+
+Jamie correctly identified that the original “extract every printed line” prompt encouraged models
+to misclassify retailer names, postal addresses, and payment/admin text as products. Replaced it with
+an explicit purchase-record contract: retailer and date are receipt-level fields; only purchased
+items and financially relevant discount/loyalty/subtotal/total/tax rows belong in `lines`; logos,
+addresses, contact/store/terminal/receipt metadata, cashier data, payment/card/cash/change/auth text,
+surveys, adverts, hours, greetings, and footer/legal text must be omitted rather than returned as
+`other`. Added field descriptions to the shared structured-output schema, clarified unit price vs
+whole-line total, weight semantics, multiplier parsing, and UK day/month/year date interpretation.
+
+Added a provider-independent normalisation safety net after validation: `other` rows are discarded;
+consecutive identical `item` rows at the same effective unit price are consolidated (including when
+unit price can be inferred from a one-item line total); confidence takes the lower source value and
+line totals are summed. It deliberately refuses to merge decimal/weighted quantities, different
+prices, differing products/units, or non-consecutive rows. Added focused regressions for all of
+those cases and for an already-correct `x3` row.
+
+Live-tested the shared prompt with Claude using a synthetic receipt containing a Morrisons postal
+address, three separate cucumber rows, milk `x2 @ £1.45`, totals, masked Visa details, and an auth
+code. Final result: shop `Morrisons`, UK date correctly normalised to `2026-07-01`, one Cucumber row
+with quantity 3 / unit 80p / total 240p, one Milk row with quantity 2 / unit 145p / total 290p,
+financial totals retained, and address/payment/auth lines absent.
+
 ## 2026-07-01 — [Codex/GPT] Firefox camera compatibility + corrected Gemini credential
 
 Jamie confirmed the deployed camera control worked in Chrome but did nothing in Firefox. Root cause

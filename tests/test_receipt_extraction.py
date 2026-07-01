@@ -12,6 +12,7 @@ from src.shopping_list.receipt_extraction import (
     ExtractionError,
     ExtractionInvalid,
     ExtractionRefused,
+    EXTRACTION_PROMPT,
     ExtractorRegistry,
     GeminiExtractor,
     OpenAIExtractor,
@@ -103,6 +104,14 @@ class ConfigValidationTests(unittest.TestCase):
 
 
 class ValidationPayloadTests(unittest.TestCase):
+    def test_prompt_requests_purchase_record_not_full_transcription(self) -> None:
+        self.assertIn("structured PURCHASE RECORD", EXTRACTION_PROMPT)
+        self.assertIn("postal addresses", EXTRACTION_PROMPT)
+        self.assertIn("payment method", EXTRACTION_PROMPT)
+        self.assertIn("Consolidate consecutive identical products", EXTRACTION_PROMPT)
+        self.assertIn("unit_price_pennies", EXTRACTION_PROMPT)
+        self.assertIn("UK numeric dates are DAY/MONTH/YEAR", EXTRACTION_PROMPT)
+
     def test_valid_payload_round_trips(self) -> None:
         result = validate_extraction_payload(
             GOOD_PAYLOAD, provider="anthropic", model="claude-haiku-4-5", raw_json=json.dumps(GOOD_PAYLOAD),
@@ -149,6 +158,76 @@ class ValidationPayloadTests(unittest.TestCase):
         result = validate_extraction_payload(payload, provider="p", model="m", raw_json="{}")
         self.assertIsNone(result.lines[0].name)
         self.assertIsNone(result.lines[0].quantity)
+
+    def test_administrative_other_lines_are_omitted(self) -> None:
+        address = {
+            "raw_text": "Hilmore House, Gain Lane, Bradford", "name": None,
+            "quantity": None, "unit": None, "unit_price_pennies": None,
+            "line_total_pennies": None, "category": "other", "confidence": 0.99,
+        }
+        payment = {**address, "raw_text": "VISA CONTACTLESS **** 1234"}
+        payload = {**GOOD_PAYLOAD, "lines": [address, GOOD_PAYLOAD["lines"][0], payment]}
+        result = validate_extraction_payload(payload, provider="p", model="m", raw_json="{}")
+        self.assertEqual([line.name for line in result.lines], ["Milk"])
+
+    def test_consecutive_identical_products_are_consolidated(self) -> None:
+        cucumber = {
+            "raw_text": "CUCUMBER 0.80", "name": "Cucumber", "quantity": 1,
+            "unit": "each", "unit_price_pennies": 80, "line_total_pennies": 80,
+            "category": "item", "confidence": 0.94,
+        }
+        payload = {**GOOD_PAYLOAD, "total_pennies": 240, "subtotal_pennies": 240,
+                   "lines": [cucumber, cucumber, cucumber]}
+        result = validate_extraction_payload(payload, provider="p", model="m", raw_json="{}")
+        self.assertEqual(len(result.lines), 1)
+        self.assertEqual(result.lines[0].name, "Cucumber")
+        self.assertEqual(result.lines[0].quantity, 3)
+        self.assertEqual(result.lines[0].unit_price_pennies, 80)
+        self.assertEqual(result.lines[0].line_total_pennies, 240)
+
+    def test_repeated_products_without_explicit_unit_price_can_infer_it(self) -> None:
+        cucumber = {
+            "raw_text": "CUCUMBER 0.80", "name": "Cucumber", "quantity": 1,
+            "unit": None, "unit_price_pennies": None, "line_total_pennies": 80,
+            "category": "item", "confidence": 0.9,
+        }
+        payload = {**GOOD_PAYLOAD, "total_pennies": 160, "subtotal_pennies": 160,
+                   "lines": [cucumber, cucumber]}
+        result = validate_extraction_payload(payload, provider="p", model="m", raw_json="{}")
+        self.assertEqual(result.lines[0].quantity, 2)
+        self.assertEqual(result.lines[0].unit_price_pennies, 80)
+        self.assertEqual(result.lines[0].line_total_pennies, 160)
+
+    def test_same_product_at_different_prices_is_not_consolidated(self) -> None:
+        first = {**GOOD_PAYLOAD["lines"][0], "name": "Cucumber", "raw_text": "CUCUMBER 0.80",
+                 "unit": "each", "unit_price_pennies": 80, "line_total_pennies": 80}
+        second = {**first, "raw_text": "CUCUMBER 0.90", "unit_price_pennies": 90,
+                  "line_total_pennies": 90}
+        payload = {**GOOD_PAYLOAD, "total_pennies": 170, "subtotal_pennies": 170,
+                   "lines": [first, second]}
+        result = validate_extraction_payload(payload, provider="p", model="m", raw_json="{}")
+        self.assertEqual(len(result.lines), 2)
+
+    def test_weighted_products_are_not_consolidated(self) -> None:
+        weighted = {**GOOD_PAYLOAD["lines"][0], "name": "Bananas", "raw_text": "BANANAS 0.456kg",
+                    "quantity": 0.456, "unit": "kg", "unit_price_pennies": 120,
+                    "line_total_pennies": 55}
+        payload = {**GOOD_PAYLOAD, "total_pennies": 110, "subtotal_pennies": 110,
+                   "lines": [weighted, weighted]}
+        result = validate_extraction_payload(payload, provider="p", model="m", raw_json="{}")
+        self.assertEqual(len(result.lines), 2)
+
+    def test_already_consolidated_multiplier_remains_one_row(self) -> None:
+        cucumber_x3 = {
+            "raw_text": "CUCUMBER x3 @ 0.80 2.40", "name": "Cucumber", "quantity": 3,
+            "unit": "each", "unit_price_pennies": 80, "line_total_pennies": 240,
+            "category": "item", "confidence": 0.96,
+        }
+        payload = {**GOOD_PAYLOAD, "total_pennies": 240, "subtotal_pennies": 240,
+                   "lines": [cucumber_x3]}
+        result = validate_extraction_payload(payload, provider="p", model="m", raw_json="{}")
+        self.assertEqual(len(result.lines), 1)
+        self.assertEqual(result.lines[0].quantity, 3)
 
     def test_non_dict_payload_rejected(self) -> None:
         with self.assertRaises(ExtractionInvalid):
