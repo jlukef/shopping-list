@@ -35,6 +35,12 @@ directions, last-item protection, route auth/origin enforcement, and frontend co
 reach the isolated local server and local-file navigation was blocked by browser policy, so no visual
 browser claim is made; authenticated HTTP round trips and static DOM wiring passed.
 
+Deployed as `30e2198` after a transactionally consistent SQLite backup
+(`data/shopping_list.sqlite.pre-history-edit-30e2198`). Post-restart verification: service active,
+health OK, unauthenticated `/api/history` returns 401, no journal warnings, and production counts
+remain exactly 3 receipts / 3 trips / 33 trip items. No production history row was mutated during
+verification; Jamie can exercise the new edit/delete controls from the authenticated UI.
+
 ## 2026-07-01 — [Codex/GPT] Receipt extraction changed from transcription to purchase records
 
 Jamie correctly identified that the original “extract every printed line” prompt encouraged models
