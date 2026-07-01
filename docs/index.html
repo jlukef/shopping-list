@@ -131,9 +131,10 @@
   ══════════════════════════════════════════════════════════ -->
   <div id="receiptsTab" class="tabContent">
 
-    <div class="segmentedControl" role="tablist" aria-label="Receipts and history">
+    <div class="segmentedControl" role="tablist" aria-label="Receipts, history and products">
       <button class="segment active" data-segment="receiptsView" role="tab" aria-selected="true">Receipts</button>
       <button class="segment" data-segment="historyView" role="tab" aria-selected="false">History</button>
+      <button class="segment" data-segment="productsView" role="tab" aria-selected="false">Products</button>
     </div>
 
     <!-- Receipt capture, AI extraction, review, and accept flow. The image is
@@ -334,6 +335,26 @@
           <button id="historyDeleteBtn" class="actionBtn danger" type="button">Delete history entry</button>
         </div>
       </div>
+    </div>
+
+    <!-- Products segment -->
+    <div id="productsView" class="segmentView" role="tabpanel">
+      <div id="productsEmpty" class="emptyState hidden">
+        <div class="emptyIcon">🏷️</div>
+        <p>No products yet — they appear as you add list items and save receipts.</p>
+      </div>
+
+      <div id="productsControls" class="productsControls hidden">
+        <input id="productSearchInput" class="fullInput" type="search" placeholder="Search products…" aria-label="Search products">
+        <p class="hint">Tick similar products to merge them into one. Their history combines, and future purchases under the old names count against the merged product.</p>
+        <div id="productMergeBar" class="productMergeBar hidden">
+          <select id="productMergeTarget" class="reviewInput grow" aria-label="Name to keep"></select>
+          <button id="productMergeBtn" class="actionBtn" type="button">Merge</button>
+          <button id="productMergeCancelBtn" class="actionBtn secondary" type="button">Cancel</button>
+        </div>
+      </div>
+
+      <ul id="productsList" class="productsList"></ul>
     </div>
 
   </div>

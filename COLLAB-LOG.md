@@ -10,6 +10,36 @@ Read this file and `BACKEND_MIGRATION_PLAN.md` before starting any assigned work
 
 Jamie can simply tell any model: **"See `COLLAB-LOG.md` for instructions."** The model should read this file and `BACKEND_MIGRATION_PLAN.md`, identify its own lane below, stay in that lane, avoid committing/pushing unless Jamie explicitly asks, and add a newest-first entry to this log when done.
 
+## 2026-07-02 — [Claude] Products screen with merge (start of Phase 6a product identity)
+
+Jamie asked for a products screen: every product with name/prices/purchase count, the ability to
+merge similar products with stats summed, and future purchases counting against the merged product.
+
+Backend (`products_service.py`, new): `GET /api/products` returns each catalog item with live
+purchase stats computed from `shopping_trip_items` (purchase count, total spend, last price/shop/
+date) plus its aliases; `POST /api/products/merge` (auth + same-origin) merges N source products
+into a chosen target — repoints `shopping_trip_items`/`receipt_items`/`shopping_list_items`/
+`item_aliases`/`suggestions`, sums `use_count`, keeps the target's name/defaults (filling gaps from
+sources), records each source's canonical name as an `item_aliases` row (`source='user'`), drops
+stale `item_purchase_stats` rows, and deletes the sources. Purchase stats are derived live, so
+merged history combines automatically.
+
+The linchpin: `ensure_catalog_item` (sqlite_api.py) now falls back to an `item_aliases` lookup when
+no canonical name matches, so a later receipt or list add under a merged-away name resolves to the
+merged product — and an alias hit deliberately does *not* overwrite the product's display name or
+defaults with raw receipt text. `getAutocomplete` also matches alias text now.
+
+Frontend: third segment `[Receipts | History | Products]`. Search box, per-product rows (name,
+"also:" alias line, purchases/last/total stats, last unit price), tick-to-select with a merge bar
+("Keep: <select> · Merge N") and a destructive-confirm dialog.
+
+Verified: 7 new tests in `tests/test_products.py` (stats, merge semantics, future-purchase-via-alias
+incl. display-name protection, validation, route auth/origin, full HTTP round trip); suite
+**165/165**, compile + `node --check` clean. Browser-verified against an isolated scratch server:
+two receipts → Products lists 3 products with correct stats → merged "MORR Cucumber Whole" into
+"Cucumber" via the UI (2 purchases, £1.55) → third receipt under the old name → Cucumber shows
+3 purchases, last 85p, £2.40, and no new product. Not deployed.
+
 ## 2026-07-01 — [Claude] Receipt prices recorded both ways; trip totals now exclude removed items
 
 Jamie's request: Morrisons prints both a unit price and a line total, other receipts print only

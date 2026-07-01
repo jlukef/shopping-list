@@ -64,6 +64,9 @@ const STATE = {
   historyTrips:       [],
   activeHistoryTrip:  null,
   historyPatchPromise: Promise.resolve(),
+  products:           [],    // catalog + live purchase stats from /api/products
+  productSearch:      '',
+  productSelection:   new Set(),  // product ids ticked for merging
 };
 
 // ── Sortable instances (keyed so we can destroy on re-render) ─
@@ -1065,6 +1068,7 @@ function switchSegment(viewId) {
   });
   $$('.segmentView').forEach(v => v.classList.toggle('active', v.id === viewId));
   if (viewId === 'historyView' && isHostedMode()) loadHistory();
+  if (viewId === 'productsView' && isHostedMode()) loadProducts();
 }
 
 // ════════════════════════════════════════════════════════════
@@ -1612,6 +1616,106 @@ async function deleteHistoryTrip() {
 }
 
 // ════════════════════════════════════════════════════════════
+// Products — the item catalog with live purchase stats and merging.
+// Merging keeps the chosen product's name; the other names become
+// aliases so future purchases still count against the merged product.
+// ════════════════════════════════════════════════════════════
+async function loadProducts() {
+  const data = await receiptFetch('/api/products');
+  if (!data) return;
+  STATE.products = data.products || [];
+  // Drop selections for products that no longer exist (e.g. just merged away).
+  const ids = new Set(STATE.products.map(p => p.id));
+  STATE.productSelection.forEach(id => { if (!ids.has(id)) STATE.productSelection.delete(id); });
+  renderProducts();
+}
+
+function productStatsLine(p) {
+  const parts = [];
+  parts.push(p.purchaseCount === 1 ? '1 purchase' : `${p.purchaseCount} purchases`);
+  if (p.lastBoughtAt) {
+    const shop = STATE.shops.find(s => s.id === p.lastShopId);
+    parts.push(`last ${p.lastBoughtAt.slice(0, 10)}${shop ? ` at ${shop.name}` : ''}`);
+  }
+  if (p.totalSpendPennies != null) parts.push(`${formatPence(p.totalSpendPennies)} total`);
+  return parts.join(' · ');
+}
+
+function renderProducts() {
+  const hasProducts = STATE.products.length > 0;
+  $('productsEmpty').classList.toggle('hidden', hasProducts);
+  $('productsControls').classList.toggle('hidden', !hasProducts);
+  const q = STATE.productSearch.trim().toLowerCase();
+  const visible = !q ? STATE.products : STATE.products.filter(p =>
+    p.name.toLowerCase().includes(q) ||
+    p.canonicalName.includes(q) ||
+    p.aliases.some(a => a.includes(q)));
+
+  $('productsList').innerHTML = visible.map(p => {
+    const sel = STATE.productSelection.has(p.id);
+    const price = p.lastUnitPricePennies != null ? formatPence(p.lastUnitPricePennies) : '';
+    const aliasLine = p.aliases.length
+      ? `<span class="hint">also: ${esc(p.aliases.join(', '))}</span>` : '';
+    return `
+      <li class="productRow${sel ? ' selected' : ''}">
+        <input type="checkbox" class="productCheck" aria-label="Select ${esc(p.name)}"
+          ${sel ? ' checked' : ''} onchange="toggleProductSelected('${p.id}')">
+        <span class="productMeta">
+          <strong>${esc(p.name)}</strong>
+          ${aliasLine}
+          <span class="hint">${esc(productStatsLine(p))}</span>
+        </span>
+        <span class="productPrice">${price}</span>
+      </li>`;
+  }).join('');
+  renderProductMergeBar();
+}
+
+function toggleProductSelected(id) {
+  if (STATE.productSelection.has(id)) STATE.productSelection.delete(id);
+  else STATE.productSelection.add(id);
+  renderProducts();
+}
+
+function renderProductMergeBar() {
+  const bar = $('productMergeBar');
+  const selected = STATE.products.filter(p => STATE.productSelection.has(p.id));
+  bar.classList.toggle('hidden', selected.length < 2);
+  if (selected.length < 2) return;
+  const targetSel = $('productMergeTarget');
+  const previous = targetSel.value;
+  targetSel.innerHTML = selected.map(p =>
+    `<option value="${esc(p.id)}">Keep: ${esc(p.name)}</option>`).join('');
+  if (selected.some(p => p.id === previous)) targetSel.value = previous;
+  $('productMergeBtn').textContent = `Merge ${selected.length}`;
+}
+
+function cancelProductSelection() {
+  STATE.productSelection.clear();
+  renderProducts();
+}
+
+async function mergeSelectedProducts() {
+  const selected = STATE.products.filter(p => STATE.productSelection.has(p.id));
+  if (selected.length < 2) return;
+  const targetId = $('productMergeTarget').value;
+  const target = selected.find(p => p.id === targetId);
+  if (!target) return;
+  const sources = selected.filter(p => p.id !== targetId);
+  const names = sources.map(p => `"${p.name}"`).join(', ');
+  if (!confirm(`Merge ${names} into "${target.name}"? Their purchase history combines and this cannot be undone.`)) return;
+  const data = await receiptFetch('/api/products/merge', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ targetId, sourceIds: sources.map(p => p.id) }),
+  });
+  if (!data) return;
+  toast(`Merged into "${target.name}"`, 'success');
+  STATE.productSelection.clear();
+  await loadProducts();
+}
+
+// ════════════════════════════════════════════════════════════
 // Inline item-name editing (create tab only)
 // ════════════════════════════════════════════════════════════
 function editItemName(span, id) {
@@ -1804,6 +1908,13 @@ function wire() {
     $('historyDateInput').addEventListener('change', saveHistoryTrip);
     $('historyTotalInput').addEventListener('change', saveHistoryTrip);
     $('historyDeleteBtn').addEventListener('click', deleteHistoryTrip);
+
+    $('productSearchInput').addEventListener('input', e => {
+      STATE.productSearch = e.target.value;
+      renderProducts();
+    });
+    $('productMergeBtn').addEventListener('click', mergeSelectedProducts);
+    $('productMergeCancelBtn').addEventListener('click', cancelProductSelection);
 
     // "Read with" model picker — kept in sync across both upload locations and the retry row.
     ['receiptAiSelect', 'receiptAiSelect2', 'retryAiSelect'].forEach(id => {

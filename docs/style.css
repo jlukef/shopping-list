@@ -866,6 +866,26 @@ body.hosted .legacyOnly { display: none; }
 .receiptListItemTitle { font-size: .9rem; font-weight: 600; color: var(--txt); }
 .status-saved { background: var(--green-lt); color: var(--green); }
 
+/* Products segment */
+.productsControls { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
+.productMergeBar { display: flex; align-items: center; gap: 8px; }
+.productMergeBar .reviewInput.grow { flex: 1; min-width: 0; }
+.productsList { list-style: none; margin: 0; padding: 0; }
+.productRow {
+  display: flex; align-items: center; gap: 10px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+  margin-bottom: 8px;
+  padding: 10px 12px;
+}
+.productRow.selected { border-color: var(--primary); }
+.productCheck { flex: none; width: 18px; height: 18px; accent-color: var(--primary); }
+.productMeta { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; font-size: .9rem; color: var(--txt); }
+.productMeta .hint { font-size: .78rem; }
+.productPrice { font-weight: 700; color: var(--txt); flex: none; }
+
 /* History trip-group skeleton */
 .historyList { list-style: none; margin: 0; padding: 0; }
 .tripCard {

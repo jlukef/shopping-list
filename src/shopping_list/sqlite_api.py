@@ -72,6 +72,17 @@ def ensure_catalog_item(
     item = session.exec(
         select(models.Item).where(models.Item.canonical_name == canonical)
     ).first()
+    via_alias = False
+    if item is None:
+        # Merged/receipt names live in item_aliases — resolving through them is
+        # what makes future purchases of an old name count against the product
+        # it was merged into.
+        alias = session.exec(
+            select(models.ItemAlias).where(models.ItemAlias.alias_text == canonical)
+        ).first()
+        if alias is not None:
+            item = session.get(models.Item, alias.item_id)
+            via_alias = item is not None
     ts = now_iso()
     if item is None:
         item = models.Item(
@@ -88,10 +99,14 @@ def ensure_catalog_item(
         session.add(item)
         session.flush()
     else:
-        item.display_name = name
-        item.default_shop_id = shop_id
-        item.default_quantity = quantity
-        item.default_unit = unit or None
+        if not via_alias:
+            # An alias hit means "MORR CUCUMBER" resolved to the merged
+            # Cucumber product — keep the product's own name and defaults
+            # rather than letting raw receipt text rename it.
+            item.display_name = name
+            item.default_shop_id = shop_id
+            item.default_quantity = quantity
+            item.default_unit = unit or None
         if increment_use:
             item.use_count += 1
             item.last_used_at = ts
@@ -384,7 +399,9 @@ class SQLiteActionService:
             rows = session.exec(
                 select(models.Item).order_by(models.Item.use_count.desc(), models.Item.canonical_name)
             ).all()
-            matches = [row for row in rows if q in row.canonical_name][:20]
+            aliases = session.exec(select(models.ItemAlias)).all()
+            alias_item_ids = {a.item_id for a in aliases if q in a.alias_text}
+            matches = [row for row in rows if q in row.canonical_name or row.id in alias_item_ids][:20]
             return {"items": [
                 {
                     "item": row.display_name or row.canonical_name,

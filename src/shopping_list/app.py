@@ -12,6 +12,7 @@ from fastapi.templating import Jinja2Templates
 from .apps_script_proxy import ProxyFetcher, make_apps_script_fetcher
 from .auth import SessionStore, User, UserStore
 from .config import Settings, load_settings
+from .products_service import ProductNotFound, ProductsService
 from .receipt_extraction import ExtractorRegistry
 from .receipts_service import ReceiptNotFound, ReceiptService, ReceiptStateError
 from .sqlite_api import SQLiteActionService
@@ -50,6 +51,7 @@ def create_app(
         ReceiptService(sqlite_actions.engine, extractor_registry=ExtractorRegistry(settings.receipt_ai))
         if sqlite_actions is not None else None
     )
+    products_service = ProductsService(sqlite_actions.engine) if sqlite_actions is not None else None
 
     app = FastAPI(title="Shopping List")
     app.state.settings = settings
@@ -392,6 +394,36 @@ def create_app(
             return JSONResponse(service.delete_history_item(trip_id, item_id))
         except (ValueError, ReceiptNotFound, ReceiptStateError) as exc:
             return receipt_error_response(exc)
+
+    # ── Products (catalog + live purchase stats + merge) ──
+    def require_products_service() -> ProductsService:
+        if products_service is None:
+            raise HTTPException(status_code=503, detail="Products are unavailable")
+        return products_service
+
+    @app.get("/api/products")
+    async def list_products_route(user: User = Depends(require_user)) -> JSONResponse:
+        service = require_products_service()
+        return JSONResponse({"products": service.list_products()})
+
+    @app.post("/api/products/merge")
+    async def merge_products_route(
+        request: Request,
+        user: User = Depends(require_user),
+        _origin: None = Depends(require_same_origin),
+    ) -> JSONResponse:
+        service = require_products_service()
+        data = await read_json_object(request)
+        target_id = str(data.get("targetId") or "")
+        source_ids = data.get("sourceIds")
+        if not isinstance(source_ids, list):
+            return JSONResponse({"error": "sourceIds must be a list"}, status_code=400)
+        try:
+            return JSONResponse(service.merge_products(target_id, [str(s) for s in source_ids]))
+        except ProductNotFound as exc:
+            return JSONResponse({"error": str(exc)}, status_code=404)
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
 
     @app.get("/")
     async def index(request: Request) -> Response:
