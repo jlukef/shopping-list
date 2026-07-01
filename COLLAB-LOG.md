@@ -29,7 +29,13 @@ Legacy static mode uses the same editor unchanged.
 Verified: suite **165/165** (seed tests are content-generic), compile/`node --check` clean.
 Browser-verified on a scratch server: Aldi loads 17 rows in the researched order, moved
 "Middle Aisle Specialbuys" to the top via the drag path, saved, re-fetched from the server in the
-new order. Deployment notes in the entry above/below as applicable.
+new order.
+
+Deployed as `8a763c1`: DB backup `data/shopping_list.sqlite.pre-layouts-8a763c1`, `--ff-only` pull,
+deleted the three shops' old seed layouts (safe — Jamie hadn't edited them; the other four shops'
+28 departments untouched), restarted the service so bootstrap reseeded from the new defaults.
+Post-deploy: morrisons 23 / aldi 17 / lidl 17 departments, 797 keywords total, Lidl order spot-checked
+(Bakery → Fruit & Vegetables → Dairy), service active, journal clean, `/healthz` 200 public.
 
 ## 2026-07-02 — [Claude] Cleared receipt/product test data from production
 
