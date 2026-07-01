@@ -148,6 +148,54 @@ class ReceiptServiceTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result["itemCount"], 1)
 
+    async def test_accept_trip_total_counts_only_included_rows(self) -> None:
+        service = self._service()
+        receipt = await service.create_receipt(_jpeg_bytes(), original_filename="r.jpg")
+        service.add_item(receipt["id"], {"name": "Milk", "quantity": 2, "unitPricePennies": 145})
+        service.add_item(receipt["id"], {"name": "Bread", "lineTotalPennies": 120})
+        dropped = service.add_item(receipt["id"], {"name": "Crisps", "lineTotalPennies": 999})
+        drop_id = dropped["items"][-1]["id"]
+        service.update_item(receipt["id"], drop_id, {"excluded": True})
+        service.patch_receipt(receipt["id"], {"totalPennies": 5000})  # printed paper total
+
+        service.accept_receipt(receipt["id"])
+        trip = service.list_history()[0]
+
+        # 2 × £1.45 derives a £2.90 line total, plus £1.20 for the bread. The
+        # removed £9.99 row and the printed £50 paper total must not count.
+        self.assertEqual(trip["totalPennies"], 410)
+        milk = next(i for i in trip["items"] if i["name"] == "Milk")
+        bread = next(i for i in trip["items"] if i["name"] == "Bread")
+        self.assertEqual(milk["lineTotalPennies"], 290)
+        self.assertEqual(milk["unitPricePennies"], 145)
+        self.assertEqual(bread["unitPricePennies"], 120)  # derived back from the line total
+
+    async def test_saved_receipt_exclusion_recomputes_trip_total(self) -> None:
+        service = self._service()
+        receipt = await service.create_receipt(_jpeg_bytes(), original_filename="r.jpg")
+        service.add_item(receipt["id"], {"name": "Milk", "lineTotalPennies": 145})
+        added = service.add_item(receipt["id"], {"name": "Bread", "lineTotalPennies": 120})
+        bread_id = added["items"][-1]["id"]
+        service.accept_receipt(receipt["id"])
+        self.assertEqual(service.list_history()[0]["totalPennies"], 265)
+
+        service.update_item(receipt["id"], bread_id, {"excluded": True})
+
+        self.assertEqual(service.list_history()[0]["totalPennies"], 145)
+
+    async def test_history_item_price_edit_recomputes_trip_total(self) -> None:
+        service = self._service()
+        receipt = await service.create_receipt(_jpeg_bytes(), original_filename="r.jpg")
+        service.add_item(receipt["id"], {"name": "Milk", "lineTotalPennies": 145})
+        service.add_item(receipt["id"], {"name": "Bread", "lineTotalPennies": 120})
+        service.accept_receipt(receipt["id"])
+        trip = service.list_history()[0]
+        milk = next(i for i in trip["items"] if i["name"] == "Milk")
+
+        updated = service.update_history_item(trip["id"], milk["id"], {"lineTotalPennies": 200})
+
+        self.assertEqual(updated["totalPennies"], 320)
+
     async def test_discard_unsaved_receipt_does_not_touch_history(self) -> None:
         service = self._service()
         receipt = await service.create_receipt(_jpeg_bytes(), original_filename="r.jpg")
@@ -444,6 +492,30 @@ class ReceiptExtractionIntegrationTests(unittest.IsolatedAsyncioTestCase):
 
         with self.assertRaises(ReceiptStateError):
             await service.retry_receipt(receipt["id"], _jpeg_bytes((801, 601)))
+
+    async def test_extraction_derives_missing_price_side_per_line(self) -> None:
+        # Morrisons prints both unit price and line total; other receipts print
+        # only one. Whichever side the model returns, both end up recorded.
+        payload = {
+            "shop_name_guess": None, "purchase_date": "2026-06-30", "currency": "GBP",
+            "subtotal_pennies": 480, "total_pennies": 480,
+            "lines": [
+                {"raw_text": "CUCUMBER x3", "name": "Cucumber", "quantity": 3, "unit": None,
+                 "unit_price_pennies": 80, "line_total_pennies": None, "category": "item", "confidence": 0.9},
+                {"raw_text": "MILK x3", "name": "Milk", "quantity": 3, "unit": None,
+                 "unit_price_pennies": None, "line_total_pennies": 240, "category": "item", "confidence": 0.9},
+            ],
+        }
+        registry = _fake_registry({"a": _StubExtractor(payload)})
+        service = self._service_with_registry(registry)
+
+        receipt = await service.create_receipt(_jpeg_bytes(), original_filename="r.jpg")
+
+        cucumber = next(i for i in receipt["items"] if i["name"] == "Cucumber")
+        milk = next(i for i in receipt["items"] if i["name"] == "Milk")
+        self.assertEqual(cucumber["lineTotalPennies"], 240)  # derived from 3 × 80p
+        self.assertEqual(milk["unitPricePennies"], 80)       # derived from 240p / 3
+        self.assertEqual(receipt["itemsTotalPennies"], 480)
 
     async def test_no_registry_configured_behaves_like_5a(self) -> None:
         service = self._service_with_registry(None)  # falls back to an empty/unconfigured registry

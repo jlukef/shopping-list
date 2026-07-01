@@ -45,6 +45,26 @@ EDITABLE_STATUSES = {"ready", "reviewed", "failed"}
 MUTABLE_STATUSES = EDITABLE_STATUSES | {"saved"}
 
 
+def _derived_prices(
+    quantity: float | None, unit_price: int | None, line_total: int | None,
+) -> tuple[int | None, int | None]:
+    """Fill in whichever of unit price / line total is missing from the other.
+
+    Receipts differ: Morrisons prints both a unit price and a line total,
+    others print only one. Whatever the extraction (or a manual edit) supplies,
+    derive the missing side so both are recorded — the unit price feeds future
+    per-item price tracking, the line total feeds trip cost. When both are
+    already present they are left exactly as printed, never recomputed.
+    A missing/zero quantity is treated as 1 (a bare priced line on a receipt).
+    """
+    qty = quantity if quantity is not None and quantity > 0 else 1.0
+    if line_total is None and unit_price is not None:
+        line_total = int(round(unit_price * qty))
+    elif unit_price is None and line_total is not None:
+        unit_price = int(round(line_total / qty))
+    return unit_price, line_total
+
+
 class ReceiptNotFound(LookupError):
     pass
 
@@ -226,6 +246,10 @@ class ReceiptService:
 
             for line_no, line in enumerate(result.lines, start=1):
                 is_item = line.category == "item"
+                unit_price, line_total = (
+                    _derived_prices(line.quantity, line.unit_price_pennies, line.line_total_pennies)
+                    if is_item else (line.unit_price_pennies, line.line_total_pennies)
+                )
                 session.add(models.ReceiptItem(
                     receipt_id=receipt.id,
                     line_no=line_no,
@@ -233,8 +257,8 @@ class ReceiptService:
                     name=line.name,
                     quantity=line.quantity,
                     unit=line.unit,
-                    unit_price_pennies=line.unit_price_pennies,
-                    line_total_pennies=line.line_total_pennies,
+                    unit_price_pennies=unit_price,
+                    line_total_pennies=line_total,
                     confidence=line.confidence,
                     category=line.category,
                     excluded=not is_item,
@@ -323,14 +347,20 @@ class ReceiptService:
             self._require_mutable(receipt)
             was_saved = receipt.status == "saved"
             ts = now_iso()
+            quantity = as_quantity(data.get("quantity"), default=1.0)
+            unit_price, line_total = _derived_prices(
+                quantity,
+                as_optional_money(data.get("unitPricePennies")),
+                as_optional_money(data.get("lineTotalPennies")),
+            )
             row = models.ReceiptItem(
                 receipt_id=receipt.id,
                 raw_text=name,  # manual row — nothing was OCR'd, name is the only "raw" text there is
                 name=name,
-                quantity=as_quantity(data.get("quantity"), default=1.0),
+                quantity=quantity,
                 unit=as_unit(data.get("unit")),
-                unit_price_pennies=as_optional_money(data.get("unitPricePennies")),
-                line_total_pennies=as_optional_money(data.get("lineTotalPennies")),
+                unit_price_pennies=unit_price,
+                line_total_pennies=line_total,
                 category="item",
                 excluded=False,
                 accepted=True,
@@ -371,6 +401,10 @@ class ReceiptService:
                 row.accepted = not row.excluded
             if "accepted" in data:
                 row.accepted = as_bool(data.get("accepted"), "accepted")
+            if row.category == "item":
+                row.unit_price_pennies, row.line_total_pennies = _derived_prices(
+                    row.quantity, row.unit_price_pennies, row.line_total_pennies,
+                )
             row.updated_at = now_iso()
             session.add(row)
             receipt.status = "saved" if was_saved else "reviewed"
@@ -404,7 +438,12 @@ class ReceiptService:
 
             ts = now_iso()
             trip_date = as_optional_date(receipt.purchase_date) or today_iso()
-            total_pennies = as_optional_money(receipt.total_pennies)
+            # Trip cost counts only the included rows — a removed line's price
+            # never lands in history. The printed receipt total stays on the
+            # receipt record as the paper reference.
+            total_pennies = self._rows_total_pennies(rows)
+            if total_pennies is None:
+                total_pennies = as_optional_money(receipt.total_pennies)
             trip = models.ShoppingTrip(
                 shop_id=receipt.shop_id,
                 trip_date=trip_date,
@@ -520,6 +559,9 @@ class ReceiptService:
                 item.unit_price_pennies = as_optional_money(data.get("unitPricePennies"))
             if "lineTotalPennies" in data:
                 item.line_total_pennies = as_optional_money(data.get("lineTotalPennies"))
+            item.unit_price_pennies, item.line_total_pennies = _derived_prices(
+                item.quantity, item.unit_price_pennies, item.line_total_pennies,
+            )
 
             catalog = ensure_catalog_item(
                 session, item.name, shop_id=trip.shop_id, quantity=item.quantity,
@@ -528,6 +570,12 @@ class ReceiptService:
             item.item_id = catalog.id
             session.add(item)
             ts = now_iso()
+            siblings = session.exec(
+                select(models.ShoppingTripItem).where(models.ShoppingTripItem.trip_id == trip.id)
+            ).all()
+            computed_total = self._rows_total_pennies(siblings)
+            if computed_total is not None:
+                trip.total_pennies = computed_total
             trip.updated_at = ts
             session.add(trip)
 
@@ -569,6 +617,10 @@ class ReceiptService:
                     receipt_item.updated_at = ts
                     session.add(receipt_item)
             session.delete(item)
+            remaining = [row for row in items if row.id != item.id]
+            computed_total = self._rows_total_pennies(remaining)
+            if computed_total is not None:
+                trip.total_pennies = computed_total
             trip.updated_at = ts
             session.add(trip)
             receipt = self._receipt_for_trip(session, trip.id)
@@ -589,6 +641,23 @@ class ReceiptService:
             return {"success": True, "deletedReceipt": receipt is not None}
 
     # ── helpers ─────────────────────────────────────────────────────────
+    @staticmethod
+    def _rows_total_pennies(rows) -> int | None:
+        """Sum of the effective line totals across rows (receipt or trip items).
+
+        This is the cost of what's actually *included* — removed/excluded rows
+        are never passed in, so they never count (Jamie, 2026-07-01). Returns
+        None when no row carries any price at all (e.g. manual list history).
+        """
+        total = None
+        for row in rows:
+            _unit, line_total = _derived_prices(
+                row.quantity, row.unit_price_pennies, row.line_total_pennies,
+            )
+            if line_total is not None:
+                total = (total or 0) + line_total
+        return total
+
     @staticmethod
     def _require_receipt(session: Session, receipt_id: str) -> models.Receipt:
         receipt = session.get(models.Receipt, _pk(receipt_id))
@@ -636,7 +705,10 @@ class ReceiptService:
             session.delete(old_item)
         trip.shop_id = receipt.shop_id
         trip.trip_date = as_optional_date(receipt.purchase_date) or today_iso()
-        trip.total_pennies = as_optional_money(receipt.total_pennies)
+        computed_total = self._rows_total_pennies(receipt_rows)
+        trip.total_pennies = (
+            computed_total if computed_total is not None else as_optional_money(receipt.total_pennies)
+        )
         trip.currency = receipt.currency
         trip.updated_at = ts
         session.add(trip)
@@ -696,21 +768,24 @@ class ReceiptService:
             } for row in rows],
         }
 
-    @staticmethod
-    def _receipt_summary_json(session: Session, receipt: models.Receipt) -> dict[str, Any]:
-        item_count = len(session.exec(
+    @classmethod
+    def _receipt_summary_json(cls, session: Session, receipt: models.Receipt) -> dict[str, Any]:
+        included = session.exec(
             select(models.ReceiptItem).where(
                 models.ReceiptItem.receipt_id == receipt.id,
                 models.ReceiptItem.accepted == True,  # noqa: E712
                 models.ReceiptItem.excluded == False,  # noqa: E712
             )
-        ).all())
+        ).all()
         return {
             "id": str(receipt.id),
             "status": receipt.status,
             "shopId": receipt.shop_id,
             "purchaseDate": receipt.purchase_date,
-            "itemCount": item_count,
+            "itemCount": len(included),
+            # Sum of the included rows only — what this receipt will cost in
+            # history right now; totalPennies stays the printed paper total.
+            "itemsTotalPennies": cls._rows_total_pennies(included),
             "subtotalPennies": receipt.subtotal_pennies,
             "totalPennies": receipt.total_pennies,
             "currency": receipt.currency,

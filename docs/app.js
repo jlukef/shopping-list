@@ -1308,7 +1308,10 @@ function renderReceiptReview() {
   $('reviewRetryHint').classList.toggle('hidden', !(canRetry && !hasFile && data.status === 'failed'));
 
   const includedCount = data.items.filter(i => i.accepted && !i.excluded).length;
-  $('reviewCount').textContent = `${includedCount} item${includedCount === 1 ? '' : 's'}`;
+  // itemsTotalPennies sums only the included rows — removing a line removes its
+  // cost, so this can legitimately differ from the printed receipt total.
+  const includedTotal = data.itemsTotalPennies != null ? ` · ${formatPence(data.itemsTotalPennies)}` : '';
+  $('reviewCount').textContent = `${includedCount} item${includedCount === 1 ? '' : 's'}${includedTotal}`;
 
   const excludedCount = data.items.filter(i => i.excluded).length;
   $('reviewExcludedNote').classList.toggle('hidden', excludedCount === 0);

@@ -10,6 +10,41 @@ Read this file and `BACKEND_MIGRATION_PLAN.md` before starting any assigned work
 
 Jamie can simply tell any model: **"See `COLLAB-LOG.md` for instructions."** The model should read this file and `BACKEND_MIGRATION_PLAN.md`, identify its own lane below, stay in that lane, avoid committing/pushing unless Jamie explicitly asks, and add a newest-first entry to this log when done.
 
+## 2026-07-01 — [Claude] Receipt prices recorded both ways; trip totals now exclude removed items
+
+Jamie's request: Morrisons prints both a unit price and a line total, other receipts print only
+one — both should be recorded or calculated on import; and the recorded cost of a receipt must not
+include removed items.
+
+Implemented in `receipts_service.py`:
+- `_derived_prices()` fills whichever of unit price / line total is missing from the other (using
+  quantity, defaulting to 1). Applied on extraction import (item lines only), manual add, item
+  edits, and history-item edits. When both are present they are left exactly as printed, never
+  recomputed — so a Morrisons line keeps both original figures.
+- Trip cost is now the sum of the *included* rows' effective line totals, computed at accept and
+  recomputed whenever a saved receipt's rows change, a history item is edited, or a history item is
+  deleted. The printed paper total stays on the receipt record (`totalPennies`) as reference; the
+  receipt JSON additionally exposes `itemsTotalPennies` (included-rows sum). Known caveat:
+  auto-excluded discount lines don't count toward the computed cost unless restored, so a
+  promo-heavy receipt's computed cost can sit above the paper total.
+- Frontend: the review footer count now reads e.g. "4 items · £12.30" and updates live as rows are
+  excluded/edited; history trip cards already showed the trip total, which now reflects the
+  computed sum.
+
+Verified: 4 new regressions (derivation both directions on import, accept-total excludes removed
+rows and ignores the paper total, saved-receipt exclusion resync, history price edit recompute),
+full suite **158/158**, compile/`node --check` clean. Also verified live in a browser against an
+isolated scratch server: upload → add £1.20 + £9.99 rows → footer "2 items · £11.19" with derived
+unit prices → exclude the £9.99 row → "1 item · £1.20" → set printed total £50 → save → History
+card shows £1.20. Not deployed.
+
+**Jamie's Phase 6 requirements (recorded 2026-07-01, for whoever plans Phase 6):**
+- Cross-shop product linking matters: he wants analysis/comparison of the same product across shops.
+- Price tracking: when a product is added to a list or arrives on a receipt, a price rise should be
+  visible somewhere.
+- Prediction should learn *where* he usually buys each product and *how often*.
+- An "always bought" tag: items marked as staples are always added to a new list.
+
 ## 2026-07-01 — [Claude] Fixed receipts stranded in `processing` by cancelled uploads
 
 Review finding: `create_receipt`/`retry_receipt` commit the receipt as `processing`, then await the
