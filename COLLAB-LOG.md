@@ -10,6 +10,16 @@ Read this file and `BACKEND_MIGRATION_PLAN.md` before starting any assigned work
 
 Jamie can simply tell any model: **"See `COLLAB-LOG.md` for instructions."** The model should read this file and `BACKEND_MIGRATION_PLAN.md`, identify its own lane below, stay in that lane, avoid committing/pushing unless Jamie explicitly asks, and add a newest-first entry to this log when done.
 
+## 2026-07-02 — [Claude] Cleared receipt/product test data from production
+
+Jamie asked for a completely clean database ahead of real use of the new features. After a
+transactionally consistent backup (`data/shopping_list.sqlite.pre-clear-20260702_003333`), deleted
+all rows from `receipt_extraction_attempts`, `shopping_trip_items`, `receipt_items`, `receipts`,
+`shopping_trips`, `suggestions`, `item_purchase_stats`, `item_aliases`, and `items` (nulling
+`shopping_list_items.item_id` first) in one transaction. Preserved: 7 shops, 62 layout departments,
+users/sessions, and `.env` (API keys untouched). The active list was already empty. Post-clear:
+all cleared tables at 0, service healthy, no restart needed.
+
 ## 2026-07-02 — [Claude] Deployed `26dab38` to production (products screen, price fixes, cancellation shield)
 
 Jamie approved. Pre-flight: production worktree clean (only prior untracked `.env` backups), on
