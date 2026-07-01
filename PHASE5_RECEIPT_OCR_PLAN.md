@@ -172,7 +172,7 @@ POST/PATCH/DELETE.
 
 | Endpoint | Method | Purpose |
 |---|---|---|
-| `/api/receipts` | `POST multipart/form-data` | Upload and extract one transient image. Returns the receipt/review representation. |
+| `/api/receipts` | `POST` raw image body | Upload and extract one transient image without multipart temp-file spooling. Returns the receipt/review representation. |
 | `/api/receipts` | GET | List receipt records (no image URL) for the Receipts tab. |
 | `/api/receipts/<id>` | GET | One receipt plus its `receipt_items`, for the review screen. |
 | `/api/receipts/<id>` | PATCH | Patch receipt-level shop/date/total fields. Shop belongs to the receipt, not each line. |
@@ -180,11 +180,15 @@ POST/PATCH/DELETE.
 | `/api/receipts/<id>/items/<item_id>` | PATCH | Edit a line or set `excluded`/`accepted`; this powers the remove/restore control without losing its raw audit text. |
 | `/api/receipts/<id>/accept` | POST | Atomically create the trip/items, mark saved, and return the created history trip. |
 | `/api/receipts/<id>/retry` | POST | Retry extraction for a failed receipt only when the browser still holds/re-supplies an image. |
-| `/api/receipts/<id>` | DELETE | Discard an unsaved receipt record. There is no persistent image file. |
+| `/api/receipts/<id>` | DELETE | Delete a receipt; if saved, atomically delete its linked history trip too. There is no persistent image file. |
+| `/api/history` | GET | List real trip-grouped history, including receipt links, totals, and item prices. |
+| `/api/history/<trip_id>` | GET/PATCH/DELETE | Read, edit, or delete a history trip. Receipt-backed changes are mirrored to the linked receipt. |
+| `/api/history/<trip_id>/items/<item_id>` | PATCH/DELETE | Edit/delete a history line; receipt-backed changes are mirrored to the source receipt row. |
 
 Every route requires the existing authenticated session. For unsafe methods, validate a same-origin
 CSRF token (preferred) or strictly validate `Origin`/`Referer`; do not rely solely on SameSite cookies.
-Reject edits/accept/discard operations that are invalid for the receipt's current state.
+Reject operations that are invalid for the receipt's current state. Saved receipts remain editable;
+their linked trip is updated in the same database transaction so the two views cannot drift.
 
 Trigger extraction **synchronously inside the upload handler** for v1, but use the async Anthropic
 client or run the synchronous SDK off FastAPI's event loop, with a firm timeout. The browser may show
@@ -314,23 +318,20 @@ reuse that pattern rather than inventing a second one.
 
 ## 9. Frontend integration
 
-Build on the existing scaffold, don't replace it:
+Implementation status (2026-07-01):
 
-- [docs/index.html](docs/index.html:140)'s `.receiptUploadActions` buttons (currently disabled,
-  "Take photo" / "Choose from library") get wired to a file `<input>` → `POST
-  /api/receipts` → optimistic insert into the receipt list at `status='uploading'`, per
+- [docs/index.html](docs/index.html:140)'s `.receiptUploadActions` buttons are wired to direct native
+  file inputs → `POST /api/receipts` → receipt review, per
   [UX_FLOWS.md:96](UX_FLOWS.md:96)'s "upload optimistically" direction.
-- Replace the inert PREVIEW review card markup ([docs/index.html:202](docs/index.html:202) area)
-  with the live version once `GET /api/receipts/<id>` returns real data: amber/green confidence dots, editable
+- The live review card uses `GET /api/receipts/<id>` data: amber/green confidence dots, editable
   name/qty/price per line, "+ Add item" row, excluded-lines toggle, sticky "Discard receipt" /
   "Save N items to history" footer — this is already fully specified in
   [UX_FLOWS.md §4](UX_FLOWS.md:111), just needs data instead of static copy.
-- History segment: same pattern, trip-grouped cards per [UX_FLOWS.md §5](UX_FLOWS.md:182), sourced
+- The History segment now has trip-grouped cards and a real editor per [UX_FLOWS.md §5](UX_FLOWS.md:182), sourced
   from `shopping_trips` + `shopping_trip_items` (receipts and manual clear-bought both land there —
   don't build a receipts-only history view).
-- Extend the existing `getHistory` response (or replace it with a read-only history route) to include
-  trip total/currency/receipt id and each row's unit price/line total. Its current payload omits
-  those fields, so the designed totals and price rows cannot otherwise render.
+- `/api/history` includes trip total/currency/receipt id and each row's unit price/line total, with
+  same-origin PATCH/DELETE routes. Receipt-backed edits/deletes stay linked in both directions.
 - Keep "View original photo" only as a client-side object-URL preview of the file selected in the
   current session. Hide it after reload and on historical/saved receipts; there is deliberately no
   server image endpoint.

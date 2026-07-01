@@ -61,6 +61,9 @@ const STATE = {
   receiptPatchPromise: Promise.resolve(), // serialize shop/date edits before accept
   receiptAiOptions:   [],    // [{alias,label,provider}] from /api/receipt-ai/options
   receiptAiSelected:  'auto',
+  historyTrips:       [],
+  activeHistoryTrip:  null,
+  historyPatchPromise: Promise.resolve(),
 };
 
 // ── Sortable instances (keyed so we can destroy on re-render) ─
@@ -1061,6 +1064,7 @@ function switchSegment(viewId) {
     s.setAttribute('aria-selected', on ? 'true' : 'false');
   });
   $$('.segmentView').forEach(v => v.classList.toggle('active', v.id === viewId));
+  if (viewId === 'historyView' && isHostedMode()) loadHistory();
 }
 
 // ════════════════════════════════════════════════════════════
@@ -1271,22 +1275,26 @@ function closeReceiptReview() {
 function renderReceiptReview() {
   const data = STATE.activeReceiptData;
   if (!data) return;
-  const editable = ['ready', 'reviewed', 'failed'].includes(data.status);
+  const editable = ['ready', 'reviewed', 'failed', 'saved'].includes(data.status);
+  const saved = data.status === 'saved';
 
   const shopSel = $('reviewShopSelect');
   shopSel.innerHTML = '<option value="">Choose shop…</option>' +
     STATE.shops.map(s => `<option value="${s.id}"${s.id === data.shopId ? ' selected' : ''}>${s.emoji} ${esc(s.name)}</option>`).join('');
   $('reviewDateInput').value = data.purchaseDate || '';
+  $('reviewTotalInput').value = data.totalPennies == null ? '' : (data.totalPennies / 100).toFixed(2);
   shopSel.disabled = !editable;
   $('reviewDateInput').disabled = !editable;
-  $('reviewSavedNote').classList.toggle('hidden', editable);
-  $('reviewSavedNote').textContent = data.status === 'saved'
-    ? 'Saved to history · read only'
+  $('reviewTotalInput').disabled = !editable;
+  $('reviewSavedNote').classList.toggle('hidden', editable && !saved);
+  $('reviewSavedNote').textContent = saved
+    ? 'Saved to history · edits here update history automatically.'
     : `${data.status} · editing is temporarily unavailable`;
   $('reviewNewItemRow').classList.toggle('hidden', !editable);
   $('reviewAddRowBtn').classList.toggle('hidden', !editable);
   $('reviewDiscardBtn').classList.toggle('hidden', !editable);
-  $('reviewSaveBtn').classList.toggle('hidden', !editable);
+  $('reviewSaveBtn').classList.toggle('hidden', !editable || saved);
+  $('reviewDiscardBtn').textContent = saved ? 'Delete receipt & history' : 'Discard';
 
   // Status chip — only shown for the "couldn't read this" branch; ready/reviewed/saved
   // are already conveyed by the shop/date fields and footer being editable or not.
@@ -1336,11 +1344,12 @@ function renderReceiptReview() {
 }
 
 async function saveReceiptShopDate() {
-  if (!STATE.activeReceiptId || !STATE.activeReceiptData || STATE.activeReceiptData.status === 'saved') return null;
+  if (!STATE.activeReceiptId || !STATE.activeReceiptData) return null;
   const receiptId = STATE.activeReceiptId;
   const payload = {
     shopId: $('reviewShopSelect').value || null,
     purchaseDate: $('reviewDateInput').value || null,
+    totalPennies: parsePenceInput($('reviewTotalInput').value),
   };
   const patch = async () => {
     const data = await receiptFetch(`/api/receipts/${receiptId}`, {
@@ -1423,12 +1432,18 @@ async function toggleReceiptItemExcluded(itemId, excluded) {
 
 async function discardReceiptReview() {
   if (!STATE.activeReceiptId) return;
+  const saved = STATE.activeReceiptData?.status === 'saved';
+  const warning = saved
+    ? 'Delete this receipt and its linked history entry? This cannot be undone.'
+    : 'Discard this receipt? This cannot be undone.';
+  if (!confirm(warning)) return;
   await STATE.receiptPatchPromise;
   const data = await receiptFetch(`/api/receipts/${STATE.activeReceiptId}`, { method: 'DELETE' });
   if (!data) return;
-  toast('Receipt discarded', 'info');
+  toast(saved ? 'Receipt and history deleted' : 'Receipt discarded', 'info');
   closeReceiptReview();
   loadReceipts();
+  if (saved) loadHistory();
 }
 
 async function acceptReceiptReview() {
@@ -1439,6 +1454,158 @@ async function acceptReceiptReview() {
   toast(`Saved ${data.itemCount} item${data.itemCount === 1 ? '' : 's'} to history`, 'success');
   closeReceiptReview();
   loadReceipts();
+}
+
+// ════════════════════════════════════════════════════════════
+// History — trip-grouped browse, edit, and delete.
+// Receipt-backed trips remain linked bidirectionally on the server.
+// ════════════════════════════════════════════════════════════
+async function loadHistory() {
+  const data = await receiptFetch('/api/history');
+  if (!data) return;
+  STATE.historyTrips = data.trips || [];
+  if (STATE.activeHistoryTrip) {
+    STATE.activeHistoryTrip = STATE.historyTrips.find(t => t.id === STATE.activeHistoryTrip.id) || null;
+  }
+  renderHistory();
+}
+
+function historyShopLabel(trip) {
+  const shop = STATE.shops.find(s => s.id === trip.shopId);
+  return shop ? `${shop.emoji} ${shop.name}` : 'Unknown shop';
+}
+
+function renderHistory() {
+  const empty = $('historyEmpty');
+  const list = $('historyList');
+  const editor = $('historyEditor');
+  if (STATE.activeHistoryTrip) {
+    empty.classList.add('hidden');
+    list.classList.add('hidden');
+    editor.classList.remove('hidden');
+    renderHistoryEditor();
+    return;
+  }
+  editor.classList.add('hidden');
+  const hasTrips = STATE.historyTrips.length > 0;
+  empty.classList.toggle('hidden', hasTrips);
+  list.classList.toggle('hidden', !hasTrips);
+  list.innerHTML = STATE.historyTrips.map(trip => {
+    const total = trip.totalPennies == null ? '' : formatPence(trip.totalPennies);
+    const source = trip.receiptId ? 'Receipt' : 'List';
+    return `<li class="tripCard">
+      <button class="tripHead" type="button" onclick="openHistoryTrip('${trip.id}')">
+        <span class="tripEmoji">${trip.receiptId ? '🧾' : '🛒'}</span>
+        <span class="tripMeta"><strong>${esc(historyShopLabel(trip))}</strong> · ${esc(trip.tripDate)} · ${trip.items.length} item${trip.items.length === 1 ? '' : 's'}<br><span class="hint">${source}</span></span>
+        <span class="tripTotal">${total}</span>
+        <span class="tripChevron">›</span>
+      </button>
+    </li>`;
+  }).join('');
+}
+
+function openHistoryTrip(id) {
+  STATE.activeHistoryTrip = STATE.historyTrips.find(t => t.id === id) || null;
+  STATE.historyPatchPromise = Promise.resolve();
+  renderHistory();
+}
+
+function closeHistoryTrip() {
+  STATE.activeHistoryTrip = null;
+  STATE.historyPatchPromise = Promise.resolve();
+  renderHistory();
+}
+
+function renderHistoryEditor() {
+  const trip = STATE.activeHistoryTrip;
+  if (!trip) return;
+  const shopSel = $('historyShopSelect');
+  shopSel.innerHTML = '<option value="">Choose shop…</option>' +
+    STATE.shops.map(s => `<option value="${s.id}"${s.id === trip.shopId ? ' selected' : ''}>${s.emoji} ${esc(s.name)}</option>`).join('');
+  $('historyDateInput').value = trip.tripDate || '';
+  $('historyTotalInput').value = trip.totalPennies == null ? '' : (trip.totalPennies / 100).toFixed(2);
+  $('historySourceChip').textContent = trip.receiptId ? 'Receipt' : 'List history';
+  $('historyLinkedNote').classList.toggle('hidden', !trip.receiptId);
+  $('historyDeleteBtn').textContent = trip.receiptId ? 'Delete receipt & history' : 'Delete history entry';
+  $('historyRows').innerHTML = trip.items.map(item => {
+    const price = item.lineTotalPennies == null ? '' : (item.lineTotalPennies / 100).toFixed(2);
+    return `<li class="reviewRow">
+      <input class="reviewInput grow" value="${esc(item.name)}" aria-label="History item name" onchange="saveHistoryItemField('${item.id}', 'name', this.value)">
+      <input class="reviewInput qty" inputmode="decimal" value="${item.quantity ?? 1}" aria-label="History quantity" onchange="saveHistoryItemField('${item.id}', 'quantity', this.value)">
+      <input class="reviewInput unit" value="${esc(item.unit || '')}" aria-label="History unit" onchange="saveHistoryItemField('${item.id}', 'unit', this.value)">
+      <input class="reviewInput price" inputmode="decimal" value="${price}" placeholder="£" aria-label="History price" onchange="saveHistoryItemField('${item.id}', 'lineTotalPennies', this.value)">
+      <button class="rowDel" type="button" title="Delete item" onclick="deleteHistoryItem('${item.id}')">✕</button>
+    </li>`;
+  }).join('');
+}
+
+async function saveHistoryTrip() {
+  const trip = STATE.activeHistoryTrip;
+  if (!trip) return null;
+  const tripId = trip.id;
+  const payload = {
+    shopId: $('historyShopSelect').value || null,
+    tripDate: $('historyDateInput').value || null,
+    totalPennies: parsePenceInput($('historyTotalInput').value),
+  };
+  const patch = () => receiptFetch(`/api/history/${tripId}`, {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+  });
+  STATE.historyPatchPromise = STATE.historyPatchPromise.then(patch, patch);
+  const data = await STATE.historyPatchPromise;
+  if (data && STATE.activeHistoryTrip?.id === tripId) {
+    STATE.activeHistoryTrip = data;
+    STATE.historyTrips = STATE.historyTrips.map(t => t.id === tripId ? data : t);
+  }
+  return data;
+}
+
+async function saveHistoryItemField(itemId, field, rawValue) {
+  const trip = STATE.activeHistoryTrip;
+  if (!trip) return;
+  const tripId = trip.id;
+  let value = rawValue;
+  if (field === 'quantity') value = Number(rawValue);
+  if (field === 'lineTotalPennies') value = parsePenceInput(rawValue);
+  const patch = () => receiptFetch(`/api/history/${tripId}/items/${itemId}`, {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ [field]: value }),
+  });
+  STATE.historyPatchPromise = STATE.historyPatchPromise.then(patch, patch);
+  const data = await STATE.historyPatchPromise;
+  if (!data) { renderHistoryEditor(); return; }
+  if (STATE.activeHistoryTrip?.id === tripId) {
+    STATE.activeHistoryTrip = data;
+    STATE.historyTrips = STATE.historyTrips.map(t => t.id === tripId ? data : t);
+  }
+}
+
+async function deleteHistoryItem(itemId) {
+  const trip = STATE.activeHistoryTrip;
+  if (!trip || !confirm('Delete this item from history?')) return;
+  await STATE.historyPatchPromise;
+  const data = await receiptFetch(`/api/history/${trip.id}/items/${itemId}`, { method: 'DELETE' });
+  if (!data) return;
+  STATE.activeHistoryTrip = data;
+  STATE.historyTrips = STATE.historyTrips.map(t => t.id === data.id ? data : t);
+  renderHistoryEditor();
+  if (trip.receiptId) loadReceipts();
+}
+
+async function deleteHistoryTrip() {
+  const trip = STATE.activeHistoryTrip;
+  if (!trip) return;
+  const warning = trip.receiptId
+    ? 'Delete this history entry and its linked receipt? This cannot be undone.'
+    : 'Delete this history entry? This cannot be undone.';
+  if (!confirm(warning)) return;
+  await STATE.historyPatchPromise;
+  const data = await receiptFetch(`/api/history/${trip.id}`, { method: 'DELETE' });
+  if (!data) return;
+  toast(data.deletedReceipt ? 'Receipt and history deleted' : 'History entry deleted', 'info');
+  closeHistoryTrip();
+  await loadHistory();
+  if (data.deletedReceipt) loadReceipts();
 }
 
 // ════════════════════════════════════════════════════════════
@@ -1619,6 +1786,7 @@ function wire() {
 
     $('reviewShopSelect').addEventListener('change', saveReceiptShopDate);
     $('reviewDateInput').addEventListener('change', saveReceiptShopDate);
+    $('reviewTotalInput').addEventListener('change', saveReceiptShopDate);
     $('reviewBackBtn').addEventListener('click', async () => {
       closeReceiptReview();
       await loadReceipts();
@@ -1627,6 +1795,12 @@ function wire() {
     $('reviewDiscardBtn').addEventListener('click', discardReceiptReview);
     $('reviewSaveBtn').addEventListener('click', acceptReceiptReview);
     $('reviewRetryBtn').addEventListener('click', retryReceiptReview);
+
+    $('historyBackBtn').addEventListener('click', closeHistoryTrip);
+    $('historyShopSelect').addEventListener('change', saveHistoryTrip);
+    $('historyDateInput').addEventListener('change', saveHistoryTrip);
+    $('historyTotalInput').addEventListener('change', saveHistoryTrip);
+    $('historyDeleteBtn').addEventListener('click', deleteHistoryTrip);
 
     // "Read with" model picker — kept in sync across both upload locations and the retry row.
     ['receiptAiSelect', 'receiptAiSelect2', 'retryAiSelect'].forEach(id => {

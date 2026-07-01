@@ -325,6 +325,74 @@ def create_app(
         except (ValueError, ReceiptNotFound, ReceiptStateError) as exc:
             return receipt_error_response(exc)
 
+    # ── History (linked bidirectionally to saved receipts where applicable) ──
+    @app.get("/api/history")
+    async def list_history_route(user: User = Depends(require_user)) -> JSONResponse:
+        service = require_receipt_service()
+        return JSONResponse({"trips": service.list_history()})
+
+    @app.get("/api/history/{trip_id}")
+    async def get_history_trip_route(trip_id: str, user: User = Depends(require_user)) -> JSONResponse:
+        service = require_receipt_service()
+        try:
+            return JSONResponse(service.get_history_trip(trip_id))
+        except (ValueError, ReceiptNotFound, ReceiptStateError) as exc:
+            return receipt_error_response(exc)
+
+    @app.patch("/api/history/{trip_id}")
+    async def patch_history_trip_route(
+        trip_id: str,
+        request: Request,
+        user: User = Depends(require_user),
+        _origin: None = Depends(require_same_origin),
+    ) -> JSONResponse:
+        service = require_receipt_service()
+        data = await read_json_object(request)
+        try:
+            return JSONResponse(service.patch_history_trip(trip_id, data))
+        except (ValueError, ReceiptNotFound, ReceiptStateError) as exc:
+            return receipt_error_response(exc)
+
+    @app.delete("/api/history/{trip_id}")
+    async def delete_history_trip_route(
+        trip_id: str,
+        user: User = Depends(require_user),
+        _origin: None = Depends(require_same_origin),
+    ) -> JSONResponse:
+        service = require_receipt_service()
+        try:
+            return JSONResponse(service.delete_history_trip(trip_id))
+        except (ValueError, ReceiptNotFound, ReceiptStateError) as exc:
+            return receipt_error_response(exc)
+
+    @app.patch("/api/history/{trip_id}/items/{item_id}")
+    async def patch_history_item_route(
+        trip_id: str,
+        item_id: str,
+        request: Request,
+        user: User = Depends(require_user),
+        _origin: None = Depends(require_same_origin),
+    ) -> JSONResponse:
+        service = require_receipt_service()
+        data = await read_json_object(request)
+        try:
+            return JSONResponse(service.update_history_item(trip_id, item_id, data))
+        except (ValueError, ReceiptNotFound, ReceiptStateError) as exc:
+            return receipt_error_response(exc)
+
+    @app.delete("/api/history/{trip_id}/items/{item_id}")
+    async def delete_history_item_route(
+        trip_id: str,
+        item_id: str,
+        user: User = Depends(require_user),
+        _origin: None = Depends(require_same_origin),
+    ) -> JSONResponse:
+        service = require_receipt_service()
+        try:
+            return JSONResponse(service.delete_history_item(trip_id, item_id))
+        except (ValueError, ReceiptNotFound, ReceiptStateError) as exc:
+            return receipt_error_response(exc)
+
     @app.get("/")
     async def index(request: Request) -> Response:
         if not current_user(request):

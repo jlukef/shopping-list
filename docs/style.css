@@ -842,6 +842,7 @@ body.hosted .legacyOnly { display: none; }
 .excludedNote { margin-top: 10px; font-style: italic; }
 .reviewFooter { display: flex; gap: 10px; margin-top: 14px; }
 .reviewFooter .actionBtn { flex: 1; }
+.actionBtn.danger { background: var(--red); border-color: var(--red); color: #fff; }
 .receiptBackBtn {
   border: none; background: none; color: var(--primary); font-weight: 600;
   padding: 0 0 10px; font-size: .88rem;
@@ -866,6 +867,7 @@ body.hosted .legacyOnly { display: none; }
 .status-saved { background: var(--green-lt); color: var(--green); }
 
 /* History trip-group skeleton */
+.historyList { list-style: none; margin: 0; padding: 0; }
 .tripCard {
   background: var(--surface);
   border: 1px solid var(--border);

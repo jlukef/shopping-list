@@ -189,8 +189,8 @@ On pressing **"Save N items to history"**:
 - Optimistically mark the receipt **"Saved"** and toast "Saved N items to history."
 - Each accepted row becomes a `shopping_trip_item` under a `shopping_trip` for that shop/date, and
   flips `receipt_items.accepted = true`. **[Codex owns]** the exact write path.
-- The receipt stays viewable in the Receipts tab as a saved record (with its photo), so the user can
-  later audit "what did that £52 shop actually contain".
+- The receipt stays viewable in the Receipts tab as a saved structured record (the photo is never
+  retained), so the user can later audit "what did that £52 shop actually contain".
 - Allow correcting a saved item after the fact (people notice mistakes later); edits update the trip
   item, not the original OCR text. `raw_text` stays immutable for audit.
 
@@ -235,21 +235,11 @@ History view structure:
 **[Codex owns]** whether `/api/history` returns trip-grouped or flat rows; the UX above assumes
 trip-grouped with item drill-down, which matches the `shopping_trips` / `shopping_trip_items` schema.
 
-Implementation note, 2026-06-30: the frontend scaffold now has a top-level **Receipts** tab with a
-**[Receipts | History]** segmented control. The Receipts segment shows a (disabled) "Take photo" /
-"Choose from library" pair, a "coming soon" caption, and a 1-2-3 **Upload → Review → Save to history**
-lifecycle explainer. The History segment explains that marking items bought now starts feeding history,
-with full trip grouping arriving alongside the database.
-
-Both segments now also carry an inert, clearly-labelled **PREVIEW** skeleton of the future screens
-(everything disabled, example rows tagged as such — no real/fake saved data):
-- Receipts preview: a review card with editable-looking shop/date, a "View original photo" panel,
-  status-copy chips (Uploading / Processing / Ready / Couldn't read), three item rows with
-  name/qty/price + amber/green confidence dots + delete, an "+ Add item" row, an excluded-lines note,
-  and a disabled "Save N items to history" footer.
-- History preview: trip-grouped cards (shop · date · item count · total, expandable-looking) with
-  example item rows.
-All display-only — upload, review, and history data endpoints remain future work.
+Implementation note, 2026-07-01: the **[Receipts | History]** control is live. Receipts support
+camera/library upload, AI extraction, review, accept, and later correction/deletion. History is
+trip-grouped and editable. Saved receipt/history pairs remain linked: edits from either surface are
+mirrored atomically, and deleting either removes the linked pair. List-generated history remains
+independent and can also be edited or deleted.
 
 ---
 
@@ -297,11 +287,12 @@ Most earlier questions are now decided (see top section). Still open:
 3. **Per-item history entry point** — is long-press acceptable on mobile, or prefer an explicit "⋯"
    menu? (Claude leans explicit menu for discoverability.)
 
-## Files this would later touch (for the implementation lane, not now)
+## Implemented files
 
-- `docs/index.html` — Receipts tab + History segment is scaffolded; future work adds upload/review screens and suggestions strip.
+- `docs/index.html` — live Receipts and History screens; suggestions remain future work.
 - `docs/app.js` — auth state, receipt upload/review/accept, history rendering, suggestions.
 - `docs/style.css` — new screens reusing existing tokens/patterns.
 - Backend (Codex lane) — auth, receipts, history, suggestions endpoints per the plan's API shape.
 
-Design note for Codex review. The first scaffold has been added separately in `docs/`; full receipt/history functionality remains unimplemented.
+Receipt/history functionality is implemented; filters, per-catalogue-item history entry points, and
+suggestions remain later enhancements.

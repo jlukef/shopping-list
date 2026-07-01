@@ -157,14 +157,105 @@ class ReceiptServiceTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(service.list_receipts(), [])
 
-    async def test_discard_saved_receipt_is_rejected(self) -> None:
+    async def test_discard_saved_receipt_removes_linked_history(self) -> None:
         service = self._service()
         receipt = await service.create_receipt(_jpeg_bytes(), original_filename="r.jpg")
         service.add_item(receipt["id"], {"name": "Milk"})
         service.accept_receipt(receipt["id"])
 
+        service.discard_receipt(receipt["id"])
+
+        self.assertEqual(service.list_receipts(), [])
+        self.assertEqual(service.list_history(), [])
+
+    async def test_saved_receipt_edits_rebuild_linked_history_atomically(self) -> None:
+        service = self._service()
+        receipt = await service.create_receipt(_jpeg_bytes(), original_filename="r.jpg")
+        added = service.add_item(receipt["id"], {
+            "name": "Milk", "quantity": 1, "unit": "L", "lineTotalPennies": 145,
+        })
+        milk_id = added["items"][0]["id"]
+        service.accept_receipt(receipt["id"])
+
+        service.patch_receipt(receipt["id"], {
+            "shopId": "aldi", "purchaseDate": "2026-06-20", "totalPennies": 345,
+        })
+        service.update_item(receipt["id"], milk_id, {
+            "name": "Whole milk", "quantity": 2, "unit": "L", "lineTotalPennies": 290,
+        })
+        service.add_item(receipt["id"], {"name": "Bread", "quantity": 1, "lineTotalPennies": 55})
+
+        saved = service.get_receipt(receipt["id"])
+        history = service.list_history()[0]
+        self.assertEqual(saved["status"], "saved")
+        self.assertEqual(history["receiptId"], receipt["id"])
+        self.assertEqual(history["shopId"], "aldi")
+        self.assertEqual(history["tripDate"], "2026-06-20")
+        self.assertEqual(history["totalPennies"], 345)
+        self.assertEqual(
+            [(row["name"], row["quantity"], row["lineTotalPennies"]) for row in history["items"]],
+            [("Whole milk", 2.0, 290), ("Bread", 1.0, 55)],
+        )
+
+    async def test_saved_receipt_cannot_remove_its_last_history_item(self) -> None:
+        service = self._service()
+        receipt = await service.create_receipt(_jpeg_bytes(), original_filename="r.jpg")
+        added = service.add_item(receipt["id"], {"name": "Milk"})
+        item_id = added["items"][0]["id"]
+        service.accept_receipt(receipt["id"])
+
         with self.assertRaises(ReceiptStateError):
-            service.discard_receipt(receipt["id"])
+            service.update_item(receipt["id"], item_id, {"excluded": True})
+
+        self.assertEqual(len(service.list_history()[0]["items"]), 1)
+
+    async def test_history_edits_flow_back_to_linked_receipt(self) -> None:
+        service = self._service()
+        receipt = await service.create_receipt(_jpeg_bytes(), original_filename="r.jpg")
+        service.add_item(receipt["id"], {"name": "Milk", "quantity": 1, "lineTotalPennies": 145})
+        accepted = service.accept_receipt(receipt["id"])
+        trip_id = accepted["tripId"]
+        history_item_id = service.get_history_trip(trip_id)["items"][0]["id"]
+
+        service.patch_history_trip(trip_id, {
+            "shopId": "lidl", "tripDate": "2026-06-21", "totalPennies": 300,
+        })
+        service.update_history_item(trip_id, history_item_id, {
+            "name": "Oat milk", "quantity": 2, "unit": "L", "lineTotalPennies": 300,
+        })
+
+        linked = service.get_receipt(receipt["id"])
+        self.assertEqual(linked["shopId"], "lidl")
+        self.assertEqual(linked["purchaseDate"], "2026-06-21")
+        self.assertEqual(linked["totalPennies"], 300)
+        self.assertEqual(linked["items"][0]["name"], "Oat milk")
+        self.assertEqual(linked["items"][0]["quantity"], 2.0)
+
+    async def test_delete_history_trip_removes_linked_receipt(self) -> None:
+        service = self._service()
+        receipt = await service.create_receipt(_jpeg_bytes(), original_filename="r.jpg")
+        service.add_item(receipt["id"], {"name": "Milk"})
+        trip_id = service.accept_receipt(receipt["id"])["tripId"]
+
+        result = service.delete_history_trip(trip_id)
+
+        self.assertTrue(result["deletedReceipt"])
+        self.assertEqual(service.list_receipts(), [])
+        self.assertEqual(service.list_history(), [])
+
+    async def test_delete_one_history_item_excludes_linked_receipt_row(self) -> None:
+        service = self._service()
+        receipt = await service.create_receipt(_jpeg_bytes(), original_filename="r.jpg")
+        service.add_item(receipt["id"], {"name": "Milk"})
+        service.add_item(receipt["id"], {"name": "Bread"})
+        trip_id = service.accept_receipt(receipt["id"])["tripId"]
+        history_item_id = service.get_history_trip(trip_id)["items"][0]["id"]
+
+        remaining = service.delete_history_item(trip_id, history_item_id)
+
+        self.assertEqual(len(remaining["items"]), 1)
+        linked = service.get_receipt(receipt["id"])
+        self.assertEqual(sum(not row["excluded"] for row in linked["items"]), 1)
 
     async def test_stored_path_is_always_empty_no_image_bytes_persisted(self) -> None:
         service = self._service()
@@ -507,6 +598,39 @@ class ReceiptRouteTests(unittest.TestCase):
 
             self.assertEqual(res.status_code, 200)
             self.assertEqual(client.get("/api/receipts").json(), {"receipts": []})
+
+    def test_saved_receipt_and_history_rest_routes_stay_linked(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            client = _make_client(tmp)
+            headers = {"origin": ORIGIN}
+            receipt_id = _upload(client).json()["id"]
+            client.post(
+                f"/api/receipts/{receipt_id}/items", json={"name": "Milk", "quantity": 1},
+                headers=headers,
+            )
+            trip_id = client.post(f"/api/receipts/{receipt_id}/accept", headers=headers).json()["tripId"]
+            history = client.get("/api/history")
+            self.assertEqual(history.status_code, 200)
+            item_id = history.json()["trips"][0]["items"][0]["id"]
+
+            patched = client.patch(
+                f"/api/history/{trip_id}/items/{item_id}",
+                json={"name": "Oat milk", "quantity": 2}, headers=headers,
+            )
+            self.assertEqual(patched.status_code, 200)
+            self.assertEqual(client.get(f"/api/receipts/{receipt_id}").json()["items"][0]["name"], "Oat milk")
+
+            deleted = client.delete(f"/api/history/{trip_id}", headers=headers)
+            self.assertEqual(deleted.status_code, 200)
+            self.assertTrue(deleted.json()["deletedReceipt"])
+            self.assertEqual(client.get("/api/receipts").json(), {"receipts": []})
+
+    def test_history_mutations_require_login_and_same_origin(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            client = _make_client(tmp)
+            self.assertEqual(client.get("/api/history").status_code, 200)
+            self.assertEqual(client.patch("/api/history/999", json={}).status_code, 403)
+            self.assertEqual(client.delete("/api/history/999").status_code, 403)
 
 
 if __name__ == "__main__":

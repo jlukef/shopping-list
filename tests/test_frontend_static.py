@@ -75,5 +75,15 @@ class FrontendStaticTests(unittest.TestCase):
         self.assertNotIn("cameraInput.click()", self.js_content)
         self.assertIn('body: file', self.js_content)
 
+    def test_saved_receipts_and_history_have_edit_delete_controls(self):
+        self.assertIn('id="reviewTotalInput"', self.html_content)
+        self.assertIn('id="historyList"', self.html_content)
+        self.assertIn('id="historyEditor"', self.html_content)
+        self.assertIn('id="historyDeleteBtn"', self.html_content)
+        self.assertIn("['ready', 'reviewed', 'failed', 'saved'].includes(data.status)", self.js_content)
+        self.assertIn("async function saveHistoryItemField", self.js_content)
+        self.assertIn("async function deleteHistoryTrip", self.js_content)
+        self.assertIn("/api/history/", self.js_content)
+
 if __name__ == '__main__':
     unittest.main()

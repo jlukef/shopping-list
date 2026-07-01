@@ -10,6 +10,31 @@ Read this file and `BACKEND_MIGRATION_PLAN.md` before starting any assigned work
 
 Jamie can simply tell any model: **"See `COLLAB-LOG.md` for instructions."** The model should read this file and `BACKEND_MIGRATION_PLAN.md`, identify its own lane below, stay in that lane, avoid committing/pushing unless Jamie explicitly asks, and add a newest-first entry to this log when done.
 
+## 2026-07-01 — [Codex/GPT] Saved receipts and real History are editable/deletable
+
+Jamie requested full correction/deletion after saving. Implemented one linked source-of-truth model:
+a saved receipt and its receipt-sourced `shopping_trip` remain bidirectionally linked. Editing receipt
+shop/date/total or item name/quantity/unit/price atomically rebuilds/updates the same history trip;
+adding/removing a saved receipt row is reflected in history. Editing a receipt-backed History trip or
+line mirrors the change to `receipts`/`receipt_items`, preserving immutable OCR `raw_text`. Deleting a
+saved receipt deletes its linked trip; deleting a receipt-backed trip deletes its linked receipt.
+List/clear-bought history has no receipt and remains independently editable/deletable. The last item
+of a trip cannot be removed alone—the UI directs the user to delete the whole entry instead.
+
+Added authenticated, same-origin REST routes: `GET /api/history`, trip GET/PATCH/DELETE, and history
+item PATCH/DELETE. History JSON now includes receipt link, source, shop/date/total/currency, and item
+quantity/unit/unit-price/line-total. The old read-only scaffold was replaced with live newest-first
+trip cards and a mobile editor. Saved receipt review is no longer read-only: shop/date/total and rows
+remain editable, rows can be added/removed, and the destructive button clearly says
+**Delete receipt & history** with confirmation. History shows whether an entry came from a receipt or
+the list and warns that linked edits also update the receipt.
+
+Regression coverage proves receipt→history and history→receipt edits, linked deletion in both
+directions, last-item protection, route auth/origin enforcement, and frontend controls. Full suite:
+**153/153 pass**; Python compile, `node --check`, and diff checks clean. Browser automation could not
+reach the isolated local server and local-file navigation was blocked by browser policy, so no visual
+browser claim is made; authenticated HTTP round trips and static DOM wiring passed.
+
 ## 2026-07-01 — [Codex/GPT] Receipt extraction changed from transcription to purchase records
 
 Jamie correctly identified that the original “extract every printed line” prompt encouraged models

@@ -42,6 +42,7 @@ from .sqlite_api import _item_pk as _pk
 from .sqlite_api import ensure_catalog_item
 
 EDITABLE_STATUSES = {"ready", "reviewed", "failed"}
+MUTABLE_STATUSES = EDITABLE_STATUSES | {"saved"}
 
 
 class ReceiptNotFound(LookupError):
@@ -262,7 +263,8 @@ class ReceiptService:
     def patch_receipt(self, receipt_id: str, data: dict[str, Any]) -> dict[str, Any]:
         with Session(self.engine) as session:
             receipt = self._require_receipt(session, receipt_id)
-            self._require_editable(receipt)
+            self._require_mutable(receipt)
+            was_saved = receipt.status == "saved"
             if "shopId" in data:
                 shop_id = data.get("shopId") or None
                 if shop_id is not None and session.get(models.Shop, shop_id) is None:
@@ -274,17 +276,21 @@ class ReceiptService:
                 receipt.total_pennies = as_optional_money(data.get("totalPennies"))
             if "subtotalPennies" in data:
                 receipt.subtotal_pennies = as_optional_money(data.get("subtotalPennies"))
-            receipt.status = "reviewed"
+            receipt.status = "saved" if was_saved else "reviewed"
             receipt.updated_at = now_iso()
             session.add(receipt)
+            if was_saved:
+                self._sync_saved_receipt_history(session, receipt, receipt.updated_at)
             session.commit()
             return self._receipt_json(session, receipt)
 
     def discard_receipt(self, receipt_id: str) -> dict[str, Any]:
         with Session(self.engine) as session:
             receipt = self._require_receipt(session, receipt_id)
-            if receipt.status == "saved":
-                raise ReceiptStateError("A saved receipt can't be discarded")
+            if receipt.shopping_trip_id is not None:
+                trip = session.get(models.ShoppingTrip, receipt.shopping_trip_id)
+                if trip is not None:
+                    session.delete(trip)
             session.delete(receipt)
             session.commit()
             return {"success": True}
@@ -294,7 +300,8 @@ class ReceiptService:
         name = as_item_name(data.get("name"))
         with Session(self.engine) as session:
             receipt = self._require_receipt(session, receipt_id)
-            self._require_editable(receipt)
+            self._require_mutable(receipt)
+            was_saved = receipt.status == "saved"
             ts = now_iso()
             row = models.ReceiptItem(
                 receipt_id=receipt.id,
@@ -311,16 +318,20 @@ class ReceiptService:
                 updated_at=ts,
             )
             session.add(row)
-            receipt.status = "reviewed"
+            receipt.status = "saved" if was_saved else "reviewed"
             receipt.updated_at = ts
             session.add(receipt)
+            session.flush()
+            if was_saved:
+                self._sync_saved_receipt_history(session, receipt, ts)
             session.commit()
             return self._receipt_json(session, receipt)
 
     def update_item(self, receipt_id: str, item_id: str, data: dict[str, Any]) -> dict[str, Any]:
         with Session(self.engine) as session:
             receipt = self._require_receipt(session, receipt_id)
-            self._require_editable(receipt)
+            self._require_mutable(receipt)
+            was_saved = receipt.status == "saved"
             row = session.get(models.ReceiptItem, _pk(item_id))
             if row is None or row.receipt_id != receipt.id:
                 raise ReceiptNotFound(f"No item {item_id} on receipt {receipt_id}")
@@ -342,9 +353,11 @@ class ReceiptService:
                 row.accepted = as_bool(data.get("accepted"), "accepted")
             row.updated_at = now_iso()
             session.add(row)
-            receipt.status = "reviewed"
+            receipt.status = "saved" if was_saved else "reviewed"
             receipt.updated_at = row.updated_at
             session.add(receipt)
+            if was_saved:
+                self._sync_saved_receipt_history(session, receipt, row.updated_at)
             session.commit()
             return self._receipt_json(session, receipt)
 
@@ -400,6 +413,8 @@ class ReceiptService:
                     unit=row.unit or "",
                     increment_use=True,
                 )
+                row.item_id = catalog.id
+                session.add(row)
                 session.add(models.ShoppingTripItem(
                     trip_id=trip.id,
                     item_id=catalog.id,
@@ -423,6 +438,136 @@ class ReceiptService:
             session.commit()
             return {"success": True, "tripId": str(trip.id), "itemCount": len(rows)}
 
+    # ── history reads / edits ──────────────────────────────────────────
+    def list_history(self) -> list[dict[str, Any]]:
+        with Session(self.engine) as session:
+            trips = session.exec(
+                select(models.ShoppingTrip).order_by(
+                    models.ShoppingTrip.trip_date.desc(), models.ShoppingTrip.id.desc()
+                )
+            ).all()
+            return [self._history_trip_json(session, trip) for trip in trips]
+
+    def get_history_trip(self, trip_id: str) -> dict[str, Any]:
+        with Session(self.engine) as session:
+            return self._history_trip_json(session, self._require_trip(session, trip_id))
+
+    def patch_history_trip(self, trip_id: str, data: dict[str, Any]) -> dict[str, Any]:
+        with Session(self.engine) as session:
+            trip = self._require_trip(session, trip_id)
+            if "shopId" in data:
+                shop_id = data.get("shopId") or None
+                if shop_id is not None and session.get(models.Shop, shop_id) is None:
+                    raise ValueError(f"Unknown shop: {shop_id}")
+                trip.shop_id = shop_id
+            if "tripDate" in data:
+                trip.trip_date = as_optional_date(data.get("tripDate")) or today_iso()
+            if "totalPennies" in data:
+                trip.total_pennies = as_optional_money(data.get("totalPennies"))
+            ts = now_iso()
+            trip.updated_at = ts
+            session.add(trip)
+
+            receipt = self._receipt_for_trip(session, trip.id)
+            if receipt is not None:
+                receipt.shop_id = trip.shop_id
+                receipt.purchase_date = trip.trip_date
+                receipt.total_pennies = trip.total_pennies
+                receipt.updated_at = ts
+                session.add(receipt)
+            for item in session.exec(
+                select(models.ShoppingTripItem).where(models.ShoppingTripItem.trip_id == trip.id)
+            ).all():
+                item.shop_id = trip.shop_id
+                session.add(item)
+            session.commit()
+            return self._history_trip_json(session, trip)
+
+    def update_history_item(self, trip_id: str, item_id: str, data: dict[str, Any]) -> dict[str, Any]:
+        with Session(self.engine) as session:
+            trip = self._require_trip(session, trip_id)
+            item = session.get(models.ShoppingTripItem, _pk(item_id))
+            if item is None or item.trip_id != trip.id:
+                raise ReceiptNotFound(f"No history item {item_id} on trip {trip_id}")
+
+            if "name" in data:
+                item.name = as_item_name(data.get("name"))
+            if "quantity" in data:
+                item.quantity = as_quantity(data.get("quantity"), default=1.0)
+            if "unit" in data:
+                item.unit = as_unit(data.get("unit")) or ""
+            if "unitPricePennies" in data:
+                item.unit_price_pennies = as_optional_money(data.get("unitPricePennies"))
+            if "lineTotalPennies" in data:
+                item.line_total_pennies = as_optional_money(data.get("lineTotalPennies"))
+
+            catalog = ensure_catalog_item(
+                session, item.name, shop_id=trip.shop_id, quantity=item.quantity,
+                unit=item.unit, increment_use=False,
+            )
+            item.item_id = catalog.id
+            session.add(item)
+            ts = now_iso()
+            trip.updated_at = ts
+            session.add(trip)
+
+            if item.source_receipt_item_id is not None:
+                receipt_item = session.get(models.ReceiptItem, item.source_receipt_item_id)
+                if receipt_item is not None:
+                    receipt_item.name = item.name
+                    receipt_item.quantity = item.quantity
+                    receipt_item.unit = item.unit
+                    receipt_item.unit_price_pennies = item.unit_price_pennies
+                    receipt_item.line_total_pennies = item.line_total_pennies
+                    receipt_item.item_id = catalog.id
+                    receipt_item.updated_at = ts
+                    session.add(receipt_item)
+            receipt = self._receipt_for_trip(session, trip.id)
+            if receipt is not None:
+                receipt.updated_at = ts
+                session.add(receipt)
+            session.commit()
+            return self._history_trip_json(session, trip)
+
+    def delete_history_item(self, trip_id: str, item_id: str) -> dict[str, Any]:
+        with Session(self.engine) as session:
+            trip = self._require_trip(session, trip_id)
+            items = session.exec(
+                select(models.ShoppingTripItem).where(models.ShoppingTripItem.trip_id == trip.id)
+            ).all()
+            item = next((row for row in items if row.id == _pk(item_id)), None)
+            if item is None:
+                raise ReceiptNotFound(f"No history item {item_id} on trip {trip_id}")
+            if len(items) == 1:
+                raise ReceiptStateError("Delete the whole history entry instead of its last item")
+            ts = now_iso()
+            if item.source_receipt_item_id is not None:
+                receipt_item = session.get(models.ReceiptItem, item.source_receipt_item_id)
+                if receipt_item is not None:
+                    receipt_item.excluded = True
+                    receipt_item.accepted = False
+                    receipt_item.updated_at = ts
+                    session.add(receipt_item)
+            session.delete(item)
+            trip.updated_at = ts
+            session.add(trip)
+            receipt = self._receipt_for_trip(session, trip.id)
+            if receipt is not None:
+                receipt.updated_at = ts
+                session.add(receipt)
+            session.commit()
+            return self._history_trip_json(session, trip)
+
+    def delete_history_trip(self, trip_id: str) -> dict[str, Any]:
+        with Session(self.engine) as session:
+            trip = self._require_trip(session, trip_id)
+            receipt = self._receipt_for_trip(session, trip.id)
+            if receipt is not None:
+                session.delete(receipt)
+            session.delete(trip)
+            session.commit()
+            return {"success": True, "deletedReceipt": receipt is not None}
+
     # ── helpers ─────────────────────────────────────────────────────────
     @staticmethod
     def _require_receipt(session: Session, receipt_id: str) -> models.Receipt:
@@ -432,9 +577,104 @@ class ReceiptService:
         return receipt
 
     @staticmethod
-    def _require_editable(receipt: models.Receipt) -> None:
-        if receipt.status not in EDITABLE_STATUSES:
+    def _require_mutable(receipt: models.Receipt) -> None:
+        if receipt.status not in MUTABLE_STATUSES:
             raise ReceiptStateError(f"A receipt with status {receipt.status} can't be edited")
+
+    @staticmethod
+    def _require_trip(session: Session, trip_id: str) -> models.ShoppingTrip:
+        trip = session.get(models.ShoppingTrip, _pk(trip_id))
+        if trip is None:
+            raise ReceiptNotFound(f"No history trip {trip_id}")
+        return trip
+
+    @staticmethod
+    def _receipt_for_trip(session: Session, trip_id: int) -> models.Receipt | None:
+        return session.exec(
+            select(models.Receipt).where(models.Receipt.shopping_trip_id == trip_id)
+        ).first()
+
+    def _sync_saved_receipt_history(self, session: Session, receipt: models.Receipt, ts: str) -> None:
+        if receipt.shopping_trip_id is None:
+            raise ReceiptStateError("Saved receipt is missing its history link")
+        trip = session.get(models.ShoppingTrip, receipt.shopping_trip_id)
+        if trip is None:
+            raise ReceiptStateError("Saved receipt history entry no longer exists")
+        receipt_rows = session.exec(
+            select(models.ReceiptItem).where(
+                models.ReceiptItem.receipt_id == receipt.id,
+                models.ReceiptItem.accepted == True,  # noqa: E712
+                models.ReceiptItem.excluded == False,  # noqa: E712
+            ).order_by(models.ReceiptItem.line_no, models.ReceiptItem.id)
+        ).all()
+        if not receipt_rows:
+            raise ReceiptStateError("A saved receipt must keep at least one history item")
+
+        for old_item in session.exec(
+            select(models.ShoppingTripItem).where(models.ShoppingTripItem.trip_id == trip.id)
+        ).all():
+            session.delete(old_item)
+        trip.shop_id = receipt.shop_id
+        trip.trip_date = as_optional_date(receipt.purchase_date) or today_iso()
+        trip.total_pennies = as_optional_money(receipt.total_pennies)
+        trip.currency = receipt.currency
+        trip.updated_at = ts
+        session.add(trip)
+        session.flush()
+        bought_at = trip.completed_at or receipt.reviewed_at or ts
+        for row in receipt_rows:
+            name = as_item_name(row.name or row.raw_text)
+            quantity = as_quantity(row.quantity, default=1.0)
+            unit = row.unit or ""
+            catalog = ensure_catalog_item(
+                session, name, shop_id=receipt.shop_id, quantity=quantity,
+                unit=unit, increment_use=False,
+            )
+            row.item_id = catalog.id
+            session.add(row)
+            session.add(models.ShoppingTripItem(
+                trip_id=trip.id,
+                item_id=catalog.id,
+                name=name,
+                quantity=quantity,
+                unit=unit,
+                shop_id=receipt.shop_id,
+                unit_price_pennies=as_optional_money(row.unit_price_pennies),
+                line_total_pennies=as_optional_money(row.line_total_pennies),
+                currency=receipt.currency,
+                bought_at=bought_at,
+                source_receipt_item_id=row.id,
+                created_at=ts,
+            ))
+
+    @classmethod
+    def _history_trip_json(cls, session: Session, trip: models.ShoppingTrip) -> dict[str, Any]:
+        rows = session.exec(
+            select(models.ShoppingTripItem).where(
+                models.ShoppingTripItem.trip_id == trip.id
+            ).order_by(models.ShoppingTripItem.id)
+        ).all()
+        receipt = cls._receipt_for_trip(session, trip.id)
+        return {
+            "id": str(trip.id),
+            "receiptId": str(receipt.id) if receipt is not None else None,
+            "shopId": trip.shop_id,
+            "tripDate": trip.trip_date,
+            "source": trip.source,
+            "totalPennies": trip.total_pennies,
+            "currency": trip.currency,
+            "updatedAt": trip.updated_at,
+            "items": [{
+                "id": str(row.id),
+                "name": row.name,
+                "quantity": row.quantity,
+                "unit": row.unit,
+                "shopId": row.shop_id,
+                "unitPricePennies": row.unit_price_pennies,
+                "lineTotalPennies": row.line_total_pennies,
+                "boughtAt": row.bought_at,
+            } for row in rows],
+        }
 
     @staticmethod
     def _receipt_summary_json(session: Session, receipt: models.Receipt) -> dict[str, Any]:

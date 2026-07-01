@@ -207,6 +207,7 @@
             <div class="reviewHeadFields">
               <select id="reviewShopSelect" class="reviewInput" aria-label="Shop"></select>
               <input id="reviewDateInput" class="reviewInput" type="date" aria-label="Date">
+              <input id="reviewTotalInput" class="reviewInput price" inputmode="decimal" placeholder="Total £" aria-label="Receipt total">
             </div>
             <span id="reviewCount" class="reviewCount">0 items</span>
           </div>
@@ -310,45 +311,27 @@
 
     <!-- History segment -->
     <div id="historyView" class="segmentView" role="tabpanel">
-      <div class="emptyState">
+      <div id="historyEmpty" class="emptyState hidden">
         <div class="emptyIcon">🕘</div>
-        <p>
-          No history view yet. Items you mark as <strong>bought</strong> are already being recorded —
-          a trip-grouped view to browse them here is coming soon.
-        </p>
+        <p>No shopping history yet.</p>
       </div>
 
-      <!-- Preview of the future trip-grouped history. Hidden by default behind a toggle
-           so the example layout never clutters real use. Inert/disabled skeleton —
-           clearly-labelled EXAMPLE layout, not real or saved data. -->
-      <button class="previewToggle" type="button" aria-expanded="false">Show example layout</button>
-      <div class="scaffoldPreview hidden" aria-hidden="true">
-        <div class="previewBar">
-          <span class="previewTag">Preview</span>
-          <span class="hint">Example layout — history will group by shopping trip. No real data yet.</span>
-        </div>
+      <ul id="historyList" class="historyList"></ul>
 
-        <div class="tripCard">
-          <button class="tripHead" type="button" disabled>
-            <span class="tripEmoji">🛒</span>
-            <span class="tripMeta"><strong>Lidl</strong> · 14 Jun · 23 items</span>
-            <span class="tripTotal">£52.10</span>
-            <span class="tripChevron">⌄</span>
-          </button>
-          <ul class="tripItems">
-            <li class="tripItem"><span>Semi-skimmed milk 2.27L</span><span class="hint">£1.45</span></li>
-            <li class="tripItem"><span>Cheddar cheese 400g</span><span class="hint">£3.10</span></li>
-            <li class="tripItem more hint">+ 21 more items…</li>
-          </ul>
+      <div id="historyEditor" class="reviewCard hidden">
+        <button id="historyBackBtn" class="receiptBackBtn" type="button">← History</button>
+        <div class="reviewHead">
+          <div class="reviewHeadFields">
+            <select id="historyShopSelect" class="reviewInput" aria-label="History shop"></select>
+            <input id="historyDateInput" class="reviewInput" type="date" aria-label="History date">
+            <input id="historyTotalInput" class="reviewInput price" inputmode="decimal" placeholder="Total £" aria-label="History total">
+          </div>
+          <span id="historySourceChip" class="statusChip status-ready"></span>
         </div>
-
-        <div class="tripCard">
-          <button class="tripHead collapsed" type="button" disabled>
-            <span class="tripEmoji">🛒</span>
-            <span class="tripMeta"><strong>Aldi</strong> · 9 Jun · 11 items</span>
-            <span class="tripTotal">£18.73</span>
-            <span class="tripChevron">›</span>
-          </button>
+        <p id="historyLinkedNote" class="hint hidden">Linked receipt · changes here also update the receipt.</p>
+        <ul id="historyRows" class="reviewRows"></ul>
+        <div class="reviewFooter">
+          <button id="historyDeleteBtn" class="actionBtn danger" type="button">Delete history entry</button>
         </div>
       </div>
     </div>
