@@ -2,12 +2,13 @@
 
 This is the local/server runbook for the shopping-list FastAPI wrapper.
 
-Status: the authenticated wrapper and clean-start SQLite action backend exist locally.
-SQLite is the intended backend; Apps Script remains an explicit configuration fallback.
-The SQLite cutover has not been deployed. Do **not** deploy until Jamie approves.
+Status: the authenticated wrapper and clean-start SQLite action backend are live at
+`sharedlist.co.uk`; Apps Script remains an explicit configuration fallback. The initial VPS
+deployment completed on 2026-06-30. Multi-provider receipt AI and transient camera upload were
+deployed on 2026-07-01 at commit `1407c12`.
 
-Deployment status: the example files in `deploy/` are **not executed** and have
-not been copied to the VPS. They are review/handoff material only.
+The live app uses `/srv/shopping-list`, its own `.venv`, `.env`, data directory, systemd service,
+and port `127.0.0.1:8770`. Caddy routes the public HTTPS domain to that port.
 
 ## Separation from the tax app
 
@@ -143,7 +144,7 @@ node --check docs\app.js
 
 The exact test count changes as parallel work lands; record the command result in `COLLAB-LOG.md`.
 
-## Production deployment shape, not yet executed
+## Production deployment shape (live)
 
 The repo now contains example deployment files:
 
@@ -152,26 +153,24 @@ deploy/shopping-list.service.example
 deploy/Caddyfile.sharedlist.example
 ```
 
-They are examples only. They have not been installed on `ledgerhouse`.
+The systemd example was used for the live `shopping-list.service`; the Caddy configuration already
+contained the matching `sharedlist.co.uk` route when the initial deployment was performed.
 
-When Jamie approves deployment:
+For a normal approved upgrade:
 
 ```bash
 cd /srv/shopping-list
-python3 -m venv .venv
+git pull --ff-only origin master
 ./.venv/bin/python -m pip install -r requirements.txt
-cp .env.example .env
-# edit .env with real values and password hashes
-./.venv/bin/python -m uvicorn src.shopping_list.app:app --host 127.0.0.1 --port 8770
+sudo systemctl restart shopping-list.service
+curl -fsS http://127.0.0.1:8770/healthz
 ```
-
-Then add a dedicated `shopping-list.service` systemd unit. Keep it separate from the tax app service.
 
 Do not put secrets in Git. Do not commit `.env`, SQLite session DBs, uploaded receipts, or private keys.
 
-## First server deploy checklist, not yet executed
+## First server deploy checklist (completed 2026-06-30)
 
-Only run this once Jamie explicitly approves deployment:
+Retained as the audit/checklist for rebuilding the service if ever needed:
 
 1. Confirm the repo is committed/pushed and the server should use that revision.
 2. SSH to `ledgerhouse` using Jamie's documented key path; do not copy or print key contents.

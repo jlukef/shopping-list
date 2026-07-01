@@ -10,6 +10,29 @@ Read this file and `BACKEND_MIGRATION_PLAN.md` before starting any assigned work
 
 Jamie can simply tell any model: **"See `COLLAB-LOG.md` for instructions."** The model should read this file and `BACKEND_MIGRATION_PLAN.md`, identify its own lane below, stay in that lane, avoid committing/pushing unless Jamie explicitly asks, and add a newest-first entry to this log when done.
 
+## 2026-07-01 — [Codex/GPT] Phase 5b deployed to `sharedlist.co.uk`
+
+Jamie explicitly approved deployment. Committed the reviewed 23-file Phase 5 set as `1407c12`
+(`Add multi-provider AI receipt reading`) and pushed `master`. Deliberately excluded Jamie's three
+untracked screenshots and the separate untracked `SharedListApp/` Android Studio project. Checked
+the staged patch for provider-key patterns before committing; no credentials were committed.
+
+Upgraded the existing isolated `/srv/shopping-list` installation in place. Before mutation, verified
+the production Git worktree was clean and retained timestamped/pre-commit backups of both `.env` and
+`data/shopping_list.sqlite`. Pulled with `--ff-only`, installed Pillow/HEIF and the three provider
+SDKs into the shopping-list `.venv`, and merged only the seven receipt-upload/AI variables from the
+local configuration into the existing production `.env`. Existing users, cookie settings, paths,
+database, Caddy, and the tax app were not changed. The locked temporary credentials file was removed
+automatically. Restarted only `shopping-list.service`.
+
+Production verification passed: service active, `/healthz` healthy, commit `1407c12`, receipt schema
+and unique hash index present, configured aliases exposed internally as `claude-fast` (Anthropic),
+`gemini-fast` (Google), and `gpt-mini` (OpenAI), unauthenticated receipt options return 401, public
+root redirects to HTTPS login, `robots.txt` returns 200, and the service journal has no warnings.
+No real receipt was submitted to production during verification, so Jamie can perform the first
+physical phone-camera/AI test. Gemini's previously tested key still appears invalid at Google;
+Claude and GPT were both live-tested successfully before deployment.
+
 ## 2026-07-01 — [Codex/GPT] Reviewed Phase 5b and finished the phone-camera handoff UX
 
 Briefly reviewed Claude's multi-provider receipt implementation and reran the complete project
@@ -28,8 +51,7 @@ network/provider failure. Also moved the model picker ahead of the capture butto
 button types, replaced stale “automatic reading is coming soon” copy, and added a static regression
 test for the rear-camera capture attribute, progress state, and raw `File` upload.
 
-**Not deployed.** A physical phone-camera test needs these local changes deployed to the HTTPS site;
-Jamie must explicitly approve that deployment first.
+This review was subsequently deployed in commit `1407c12`; see the newer deployment entry above.
 
 ## 2026-07-01 — [Claude] Phase 5b implemented (multi-provider AI receipt extraction), picking up Codex's in-progress plan revision + 5a hardening
 
