@@ -474,6 +474,70 @@ Exit criteria:
 - App can suggest likely needed items from history.
 - User can accept suggestions into the current list.
 
+## Future idea: native Android wrapper app + home-screen widget (not started)
+
+Context, 2026-07-01: investigated why Chrome on Jamie's Pixel 10 Pro XL (Chrome 149) never
+offers "Add to Home screen" / "Install app" for `sharedlist.co.uk` (or, he reports, for other
+sites either). Along the way, found and fixed a real bug — `<link rel="manifest">` fetches omit
+cookies by default, so Chrome was silently hitting the login wall instead of reading the
+manifest; fixed with `crossorigin="use-credentials"` (shipped). Confirmed via server logs the
+manifest now loads correctly (200, not 303), and ruled out engagement-timing, Chrome policies
+(`chrome://policy` shows none), and launcher incompatibility (stock Pixel Launcher). Even so, the
+menu still doesn't show the option — not even the manifest-free basic bookmark shortcut — which
+points at a device/Chrome-version-specific quirk on very recent hardware, outside what's
+diagnosable remotely. Jamie proposed sidestepping it entirely with a native wrapper.
+
+### Wrapper app
+
+A thin native Android shell: one Activity, one `WebView` pointed at `https://sharedlist.co.uk`,
+nothing else. This is a well-understood, simple pattern (well under 100 lines), and completely
+sidesteps the installability investigation above since it's not a PWA at all.
+
+Required WebView settings:
+
+- `javaScriptEnabled = true` (the app is fully JS-driven).
+- `domStorageEnabled = true` — **required**, not optional: the frontend uses `localStorage` for
+  `shopOrder`, `defaultShop`, `createEnabledShops`, and legacy `scriptUrl`. Without this, shop
+  ordering/preferences silently break.
+- `CookieManager` with `setAcceptCookie(true)`, so the login session persists across app restarts.
+- `INTERNET` permission in the manifest.
+- Override back-button handling: `webView.goBack()` when `webView.canGoBack()`, else default.
+- Reuse the existing generated icons (`docs/icons/icon-192.png`, `docs/icons/icon-512.png`) as the
+  launcher icon instead of designing new assets.
+- Tint the status bar to `#1a1a2e` to match the web app's theme color for a consistent look.
+
+Process: Jamie creates an empty "Empty Views Activity" project in Android Studio and hands over
+the project folder path. From there it's a handful of file edits (manifest, one layout, one
+Activity class, icon resources). The project's `gradlew` wrapper should allow building
+(`gradlew assembleDebug`) and installing (`adb install`, already working from this session) from
+the command line, without needing Android Studio open again.
+
+Naming: recommended **"SharedList"** (matches the `sharedlist.co.uk` domain, distinct from any
+generic "Shopping List" app on the device). Alternative: **"Shop List"** (matches the existing
+PWA manifest `short_name` exactly, for branding consistency).
+
+### Follow-on: home-screen widget for adding items
+
+Discussed as a natural next step once the wrapper app exists, not a replacement for it.
+Architectural constraint: Android home-screen widgets are built from `RemoteViews`, which
+**cannot embed a WebView** — so the widget can't just "run the website" the way the wrapper app
+does. It needs a small slice of native (Kotlin/Java) code that calls the existing
+`GET /api?action=addItem&data=...` endpoint directly over HTTP, reusing the session cookie the
+wrapper app's `CookieManager` already holds. **No backend changes needed** — the legacy GET
+action contract is already widget-friendly.
+
+Two design tiers, not yet decided which to build:
+
+- **Simple ("quick-add" buttons):** a small number of buttons for frequently-added items (e.g.
+  drawn from the autocomplete/use-count data), each tap fires a background HTTP call to add that
+  item with no app-opening required. Straightforward to build.
+- **Ambitious (free-text entry):** type any item name directly into the widget and tap Add.
+  Meaningfully fussier — Android's support for real text input inside home-screen widgets has been
+  inconsistent/limited across versions — so this needs more validation before committing to it.
+
+Status: **not started.** Revisit once Jamie provides the empty Android Studio project. Build the
+wrapper app first; treat the widget as a separate follow-on step after that's working.
+
 ## Deployment workflow
 
 Recommended simple workflow:
