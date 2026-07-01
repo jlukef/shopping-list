@@ -258,7 +258,7 @@ CREATE TABLE receipts (
     shop_id             TEXT REFERENCES shops(id) ON DELETE SET NULL,
     purchase_date       TEXT,                    -- 'YYYY-MM-DD' parsed from the receipt
     original_filename   TEXT,
-    stored_path         TEXT NOT NULL,           -- file on disk under data/uploads/ (NOT in DB)
+    stored_path         TEXT NOT NULL,           -- legacy field; "" for transient-only uploads
     mime_type           TEXT,
     file_size_bytes     INTEGER,
     status              TEXT NOT NULL DEFAULT 'uploaded'
@@ -468,9 +468,10 @@ ORDER BY days_since DESC;
 2. **Migration tool:** Alembic vs hand-rolled numbered SQL scripts? (Leaning Alembic for safety.)
 3. **Sessions `username` → `user_id`** now (clean) or defer one phase (less churn)? Auth-adjacent —
    Codex's call.
-4. **Receipt image retention** — **decided** in `BACKEND_MIGRATION_PLAN.md` (Codex review notes): keep
-   uploaded receipt images for audit/review initially, stored locally under the app data directory;
-   add configurable cleanup later if storage/privacy becomes a concern. No longer open.
+4. **Receipt image retention** — **decided by Jamie on 2026-07-01**: do not persist uploaded receipt
+   images in SQLite or on disk. Process them transiently and delete all bytes after extraction on
+   both success and failure paths. The existing `stored_path` column remains a compatibility field
+   and is empty for new uploads. No longer open.
 5. **Quantity vs weight semantics:** is `quantity=0.4, unit='kg'` enough, or do we need a separate
    weight field for loose goods? (Leaning: `quantity`+`unit` is enough.)
 6. **AI prediction scope for v1:** ship cadence-only first and add the `ai` source later? (Leaning yes

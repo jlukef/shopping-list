@@ -60,7 +60,7 @@ Browser
   -> Caddy / HTTPS / noindex headers
   -> Python/FastAPI app on 127.0.0.1:8770
   -> SQLite via SQLModel/SQLAlchemy
-  -> local receipt image storage under /srv/shopping-list/data/uploads
+  -> transient receipt image processing (no persistent image retention)
 ```
 
 Codex decision, 2026-06-30: use Python/FastAPI for the backend rather than Node/Express. This repo is currently plain static JS, but Jamie's adjacent tax app already uses FastAPI, Uvicorn, Jinja templates, static mounting, receipt/camera flows, and Python tests. Matching that ecosystem should make review, testing, deployment, and later receipt/OCR work easier than introducing a second backend stack.
@@ -182,7 +182,7 @@ receipts
 - uploaded_by_user_id
 - shop_id nullable
 - original_filename
-- stored_path
+- stored_path (legacy compatibility field; empty for new transient-only uploads)
 - status
 - ocr_text nullable
 - extracted_at nullable
@@ -261,7 +261,7 @@ Target flow:
 
 ```text
 User uploads or takes receipt photo
-  -> server stores image
+  -> server validates/processes image transiently, then deletes the bytes
   -> OCR / vision extraction runs
   -> raw text and structured candidate items are saved
   -> user reviews and corrects extracted items
@@ -277,7 +277,10 @@ Possible OCR/extraction options:
 - Vision-capable AI model for structured extraction from receipt images.
 - Hybrid approach: OCR text first, AI cleanup second.
 
-For privacy and cost control, store the original receipt image locally and only send image/text to an external AI service if Jamie explicitly chooses that route.
+Jamie decided on 2026-07-01 that receipt image files are not retained in SQLite or on the server.
+The server may hold bytes only transiently while validating/converting/extracting and must clean them
+up on every success/failure path. Sending the transient image to an external AI service still
+requires Jamie's explicit approval.
 
 ## Prediction strategy
 
@@ -390,7 +393,9 @@ Immediate decisions from Claude's open questions:
 - Suggestions should be household-global in the UI, with room for per-user signals underneath.
 - Accept Claude's history-placement direction: use a future Receipts tab with a segmented `[Receipts | History]` control, plus an explicit per-item `... -> History` entry point rather than relying on long-press discovery.
 - Accept Claude's clear-bought direction for the DB-backed version: clear-bought should archive/move bought rows into history before removing them from the active list. The UI copy should make that clear.
-- Receipt-image retention default: keep uploaded receipt images for audit/review initially, stored locally under the app data directory; add configurable cleanup later if storage/privacy becomes a concern.
+- Receipt-image retention: Jamie decided on 2026-07-01 that uploaded receipt images must not be
+  saved. Keep only structured/corrected receipt data; a browser-local preview may exist during the
+  current review session and disappears afterward.
 
 Gemini's `gemini_checklist_review.md` is accepted as a useful checklist handoff. It correctly spots the main migration issues:
 
@@ -576,7 +581,8 @@ Every agent should update `COLLAB-LOG.md` after meaningful work.
 ## Open questions
 
 - What measured workload or concurrency threshold would justify a future PostgreSQL move?
-- Should receipt images be kept forever, deleted after extraction, or configurable?
+- Receipt images are deleted immediately after transient extraction and are never persistently
+  stored (decided by Jamie on 2026-07-01).
 - Should OCR/AI run locally, via an external API, or both?
 - Should list suggestions be global to the household or personalised per user?
 - How much of the existing Apps Script admin/settings UI should remain during transition?

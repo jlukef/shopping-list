@@ -188,7 +188,14 @@ class Receipt(SQLModel, table=True):
     shop_id: Optional[str] = Field(default=None, foreign_key="shops.id", ondelete="SET NULL")
     purchase_date: Optional[str] = None
     original_filename: Optional[str] = None
-    stored_path: str                                        # file on disk, NOT in DB
+    # Legacy column, kept for schema compatibility. Receipt images are never
+    # persisted (Jamie's 2026-07-01 decision, PHASE5_RECEIPT_OCR_PLAN.md §5) —
+    # new rows always write "" here, never a real path.
+    stored_path: str = ""
+    # SHA-256 of the normalised (EXIF-rotated, resized) image bytes, computed
+    # transiently before the bytes are discarded. Used to dedupe repeat
+    # uploads of the same photo without keeping the photo itself.
+    content_sha256: Optional[str] = Field(default=None, index=True)
     mime_type: Optional[str] = None
     file_size_bytes: Optional[int] = None
     status: str = Field(default="uploaded", index=True)
@@ -229,6 +236,33 @@ class ReceiptItem(SQLModel, table=True):
     accepted: bool = False
     created_at: str
     updated_at: str
+
+
+class ReceiptExtractionAttempt(SQLModel, table=True):
+    """Diagnostics for the 5b AI extraction fallback chain (PHASE5_RECEIPT_OCR_PLAN.md §3).
+
+    Deliberately holds no image data — receipt images are never persisted. One row
+    per provider attempt, so a receipt that fell through Claude -> Gemini -> GPT
+    before succeeding (or failing outright) leaves a full audit trail of why.
+    """
+
+    __tablename__ = "receipt_extraction_attempts"
+    __table_args__ = (
+        CheckConstraint(
+            "outcome IN ('success','refused','invalid','timeout','rate_limited','unavailable','error')",
+            name="ck_receipt_extraction_attempts_outcome",
+        ),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    receipt_id: int = Field(foreign_key="receipts.id", ondelete="CASCADE", index=True)
+    alias: str
+    provider: str
+    model: str
+    outcome: str
+    error_class: Optional[str] = None
+    duration_ms: Optional[int] = None
+    created_at: str
 
 
 # ── Prediction ───────────────────────────────────────────────────────────────

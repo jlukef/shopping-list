@@ -1,4 +1,6 @@
 .env
+*_API_KEY.txt
+*_API_KEY.md
 .venv/
 __pycache__/
 *.py[cod]

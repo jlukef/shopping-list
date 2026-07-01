@@ -10,6 +10,185 @@ Read this file and `BACKEND_MIGRATION_PLAN.md` before starting any assigned work
 
 Jamie can simply tell any model: **"See `COLLAB-LOG.md` for instructions."** The model should read this file and `BACKEND_MIGRATION_PLAN.md`, identify its own lane below, stay in that lane, avoid committing/pushing unless Jamie explicitly asks, and add a newest-first entry to this log when done.
 
+## 2026-07-01 — [Codex/GPT] Reviewed Phase 5b and finished the phone-camera handoff UX
+
+Briefly reviewed Claude's multi-provider receipt implementation and reran the complete project
+verification: **138/138 tests pass**, Python compile is clean, `node --check docs/app.js` is clean,
+and `git diff --check` is clean. The provider-neutral backend, transient raw-body upload, retry
+contract, structured validation, and no-image-persistence rule remain intact. No blocker found in
+the implementation; Claude's previously reported Gemini credential rejection remains external to
+the code.
+
+The web camera control was already correctly configured as an image file input with
+`capture="environment"`, and its selected `File` already flowed directly into the AI upload body.
+Fixed the practical mobile-test gap around it: while a camera/library upload or AI retry is running,
+the Receipts tab now shows a visible **Reading receipt with AI…** spinner and disables all upload and
+model controls to prevent double submissions. The controls are restored in `finally`, including on
+network/provider failure. Also moved the model picker ahead of the capture buttons, added explicit
+button types, replaced stale “automatic reading is coming soon” copy, and added a static regression
+test for the rear-camera capture attribute, progress state, and raw `File` upload.
+
+**Not deployed.** A physical phone-camera test needs these local changes deployed to the HTTPS site;
+Jamie must explicitly approve that deployment first.
+
+## 2026-07-01 — [Claude] Phase 5b implemented (multi-provider AI receipt extraction), picking up Codex's in-progress plan revision + 5a hardening
+
+Codex had revised `PHASE5_RECEIPT_OCR_PLAN.md` §3-4 toward a **provider-neutral** extraction design
+(Anthropic/Google/OpenAI adapters, "Read with" picker, automatic fallback) and separately hardened
+the 5a code (real bug fixes — see below) before running out of credits mid-task, leaving §10's open
+decisions stale against the new §3. Jamie supplied all three provider API keys directly (as local
+files, now safely gitignored and moved into `.env`) and confirmed via the AskUserQuestion prompt that
+he wants all three wired for real, not just Anthropic. This entry picks up from there.
+
+**What Codex's unfinished pass already fixed in the 5a code (verified, not redone):**
+- Upload now reads the raw ASGI body directly (`request.stream()`) instead of FastAPI's
+  `UploadFile`/multipart parser, which spools files over 1MiB to a real temp file on disk —
+  silently violating the "images never touch disk" rule for any realistically-sized phone photo.
+- `content_sha256`'s migrated index now matches SQLModel's auto-generated name
+  (`ix_receipts_content_sha256`) instead of a differently-named duplicate.
+- Frontend edits (shop/date/item fields) are now serialized through `STATE.receiptPatchPromise`
+  before accept, closing a race where a fast Save-after-edit could accept a stale receipt.
+- Added a back button, inline name/qty/unit/price editing, and read-only rendering once a receipt
+  reaches `saved` (previously showed live-looking but non-functional inputs).
+- Stricter field validation (`receipt_fields.py` now, hoisted out of `receipts_service.py` so
+  `receipt_extraction.py` can share it without a circular import): required-boolean checks, real
+  ISO-date + no-future-date validation, integer-only money, bounded name/unit length.
+
+**5b implementation (this session):**
+- `config.py` — `ReceiptAISettings`/`ReceiptAIOption`, parsing `SHOPPING_LIST_RECEIPT_AI_OPTIONS`
+  (`alias=provider:model;...`), `_DEFAULT`, `_FALLBACKS`. Fails fast at startup on duplicate aliases,
+  unknown providers, an empty fallback list, or a default that isn't `auto`/an enabled alias.
+  Deliberately optional — unset, the app behaves exactly like 5a.
+- `receipt_extraction.py` — provider-neutral core: `ReceiptExtractor` protocol, one shared JSON
+  Schema + prompt (OpenAI strict-mode compatible: every key listed in `required`, nullable via
+  `anyOf`), a business-rule validator (currency/date/confidence/line-count/money bounds, plus a soft
+  "total wildly inconsistent with line items" sanity check), and `extract_with_fallback` (tries the
+  configured order, stops at first success, raises `AllExtractionAttemptsFailed` with a full attempt
+  log otherwise — but a *specific* model pick is one shot only, no silent fallback). Real adapters
+  for all three providers, verified against each SDK's actual installed method signatures before
+  writing the calls (not just docs) — `client.messages.create(output_config=...)` for Anthropic,
+  `client.aio.interactions.create(response_format=...)` for Google's newer Interactions API,
+  `client.chat.completions.create(response_format={"type":"json_schema",...})` for OpenAI.
+- `models.py` — `ReceiptExtractionAttempt` (receipt id, alias, provider, model, outcome, error_class,
+  duration_ms — no image data, ever). Brand-new table, no migration needed.
+- `receipts_service.py` — `create_receipt`/`retry_receipt` are now async; extraction runs off any
+  open DB session (only opened before/after the network call, never held across it). Successful
+  extraction: writes `receipt_items` with `excluded=(category != 'item')`, tries an exact
+  case-insensitive match of `shop_name_guess` against existing shops to auto-fill `shop_id`, stores
+  `ocr_engine`/`raw_extraction_json`/`extracted_at`. All-attempts-failed: marks `status='failed'` and
+  still records every attempt. A receipt found stuck in `processing` at startup (crashed mid-extraction)
+  is auto-recovered to `failed` so it's never permanently stuck. `retry_receipt` is a full
+  replace-all-lines operation, not a merge — documented as a known simplification; the frontend
+  confirms with the user first when there's anything to lose.
+- `app.py` — `GET /api/receipt-ai/options` (safe alias/label/provider list, no keys), upload/retry
+  both accept `?extractor=<alias|auto>`, new `POST /api/receipts/{id}/retry` (same raw-body contract
+  as upload).
+- Frontend — "Read with" picker (hidden entirely when no provider is configured), real confidence
+  dots (≥0.6 green, else amber), the excluded-lines note, and a Retry control that only appears while
+  the browser still holds the in-memory `File` for *that specific* receipt (tracked via
+  `activeReceiptFileFor` so opening a different receipt from the list can't offer to retry it with a
+  stale, unrelated photo).
+
+**Verification:**
+- 137/137 tests pass (26 new in `test_receipt_extraction.py` covering config validation, the shared
+  payload validator, fallback orchestration with fake extractors, and mocked-SDK adapter wiring for
+  all three providers; 6 new integration tests in `test_receipts.py` exercising the full
+  `ReceiptService` path with a fake registry). `compileall` and `node --check` clean.
+- **Live API calls** (real keys, tiny synthetic receipt image, not mocked): Anthropic
+  (`claude-haiku-4-5`) and OpenAI (`gpt-5.4-mini`) both succeeded with plausible structured
+  extraction on the first try. **Google's key was rejected by Google's API directly**
+  (`API_KEY_INVALID`, HTTP 400) — same call pattern as the other two, so this reads as a genuine
+  credential problem (wrong project scope, Generative Language API not enabled, or a bad copy), not
+  an adapter bug. Needs Jamie to check/regenerate that key before Gemini can be used.
+- Full browser round-trip against the real server: uploaded a synthetic Morrisons receipt, selected
+  Claude explicitly, got back 4 correctly-priced items plus 3 correctly-excluded lines (subtotal/
+  loyalty points/total) with the shop auto-matched and date auto-filled, saved to history, and
+  confirmed in the DB afterward that `receipt_extraction_attempts` recorded one `success` row and
+  `receipts.stored_path` was still `""` — no image bytes persisted anywhere.
+
+**Security note handled mid-session:** Jamie's three key files were left at the repo root
+(`CLAUDE_API_KEY.txt`, `GEMINI_API_KEY.md`, `OPENAI_API_KEY.md`, all untracked). Added
+`*_API_KEY.txt`/`*_API_KEY.md` to `.gitignore` and confirmed via `git check-ignore` before moving
+their values into `.env`. A file-watcher hook briefly surfaced the raw key values in-session when
+`.env` was edited (unavoidable given how the harness reports external file changes) — they were not
+otherwise echoed, logged, or committed; `.env` remains gitignored as before.
+
+**Not done / still open:**
+- Gemini's API key needs checking — see above.
+- `retry_receipt`'s full-replace semantics don't preserve manually-added rows across a retry;
+  provenance tracking (AI vs. manual) would need a new column if that's ever wanted.
+- Canonicalisation confirm chips and the duplicate-receipt soft warning (UX_FLOWS.md) — folded into
+  5c, not started.
+- History tab/`getHistory` still doesn't surface receipt totals/prices (plan §9) — separate from 5b.
+- Nothing committed or pushed — all local, pending Jamie's review.
+
+Next authorized action: Jamie checks the Gemini key, reviews the diff, and decides whether to commit
+and/or continue into 5c (polish) or history-tab work.
+
+## 2026-07-01 — [Claude] Phase 5a implemented (receipt upload plumbing, no AI yet)
+
+Implemented the 5a slice of `PHASE5_RECEIPT_OCR_PLAN.md` (§13 build sequence) after Codex's
+revisions to that plan — most notably the "no image retention" decision and the switch to real
+REST routes for receipts. Not yet committed/pushed or deployed; local only, all pending Jamie's
+review.
+
+**Backend (`src/shopping_list/`):**
+- `receipt_images.py` — transient image validation/normalisation. Validates via `Image.verify()`,
+  checks header dimensions against `MAX_DECODED_PIXELS` *before* decoding (decompression-bomb
+  guard), applies EXIF orientation then discards all metadata by pasting into a fresh `Image.new`,
+  resizes to a 1600px long edge, re-encodes as JPEG, hashes with SHA-256. Nothing here touches disk;
+  HEIC input is supported via `pillow-heif`.
+- `receipts_service.py` — `ReceiptService`: upload (dedupes by `content_sha256`, no persisted
+  bytes), list/get, patch (shop/date/totals), manual `add_item`/`update_item` (no AI extraction —
+  that's 5b), `accept_receipt` (atomic trip + trip-items, idempotent — a second accept raises rather
+  than duplicating), `discard_receipt` (blocked once saved). Reuses the list tab's existing
+  `ensure_catalog_item` canonicalisation (hoisted out of `SQLiteActionService` into a module-level
+  function in `sqlite_api.py` so both call sites share it, not a second scheme).
+- `models.py` — added `Receipt.content_sha256` (indexed); `stored_path` is now always `""` and
+  documented as a legacy-compatibility column, never a real path.
+- `db.py` — `_ensure_receipt_migrations()`, called from `bootstrap()`, idempotently `ALTER TABLE`s
+  the column onto an existing `receipts` table (production already has the table from
+  `create_all()`, just without this column — `create_all` never alters existing tables).
+- `app.py` — new REST routes (`POST/GET /api/receipts`, `GET/PATCH/DELETE /api/receipts/{id}`,
+  `POST /api/receipts/{id}/items`, `PATCH /api/receipts/{id}/items/{item_id}`,
+  `POST /api/receipts/{id}/accept}`), all behind `require_user`. Unsafe methods additionally require
+  `require_same_origin` (Origin, falling back to Referer, compared against `request.base_url`) —
+  a deliberate exception to the "GET only" rule since receipts have no Apps Script equivalent and
+  the traffic is same-origin. Upload reads the multipart body in bounded chunks and 413s once
+  `SHOPPING_LIST_MAX_UPLOAD_MB` is exceeded, without buffering the rest.
+- `config.py` / `.env.example` — new `SHOPPING_LIST_MAX_UPLOAD_MB` (default 10).
+- `requirements.txt` — added `Pillow` and `pillow-heif`. **Not yet installed in the server's venv —
+  needs `pip install -r requirements.txt` there before any deploy.**
+
+**Frontend (`docs/`):** wired the existing (previously inert) Receipts-tab scaffold up to the new
+routes — Take photo / Choose from library buttons, live receipt list, a review card (shop/date
+pickers, manual "+ Add item", remove/restore per line, Discard/Save footer). Reused the CSS classes
+already designed for the PREVIEW skeleton rather than inventing new ones. Gated behind
+`isHostedMode()`; legacy static/GitHub Pages mode leaves the buttons disabled since there's no
+backend there. Confidence dots and the canonicalisation confirm UI are intentionally not wired —
+there's no AI extraction yet in this slice (5c per the plan).
+
+**Verification:** 98/98 tests pass (`python -m unittest discover -s tests`, including 22 new in
+`tests/test_receipts.py`), `compileall` and `node --check docs/app.js` clean. Also smoke-tested live
+in a browser preview against a real local server: upload → shop/date entry → manual add-item →
+exclude/restore → save → idempotent re-save correctly rejected (409) → a second, unsaved receipt
+discarded cleanly. Found and fixed one real bug during that pass (missing `await` before
+`openReceiptReview` in `uploadReceiptFile`).
+
+**Not done / explicitly out of scope for 5a:**
+- No AI extraction (5b) — review screens start empty, items are typed in by hand.
+- No confidence dots, canonicalisation confirm chips, or duplicate-receipt soft warning (5c).
+- History tab/`getHistory` untouched — accepted receipts don't yet appear there with totals; per
+  plan §9 that needs `getHistory` extended with trip total/receipt id/price fields, deferred.
+- Production DB has an old `receipts` table missing `content_sha256` — the migration in `db.py` is
+  written and covers this, but hasn't been run against production, and Pillow/pillow-heif aren't
+  installed on the server yet. Both need doing before any deploy.
+- Open decisions from `PHASE5_RECEIPT_OCR_PLAN.md` §10 (OCR model, Anthropic API key, upload
+  limits, external-processing consent) are still unresolved — needed before 5b starts.
+
+Next authorized action: Jamie reviews the diff; if happy, decide whether to commit, then pick up 5b
+(AI extraction) once the §10 decisions are made.
+
 ### Codex / GPT — coordinator, reviewer, integration owner
 
 Codex owns the migration sequence, reviews Claude/Gemini outputs, makes final architecture/security/deployment decisions, and implements or merges sensitive pieces such as auth, sessions, migrations, tests, and deployment handoff.
@@ -398,6 +577,24 @@ Add new entries directly under the `---` separator. Do not rewrite older entries
 If an agent cannot run tests or deploy steps, it should write the test/deploy notes here and leave a clear handoff for Codex to run them.
 
 ---
+
+- 2026-07-01 — [Codex/GPT] — **Expanded `PHASE5_RECEIPT_OCR_PLAN.md` with the review findings Jamie
+  approved.** Receipt mutations now use REST methods plus CSRF/origin validation; the plan adds the
+  missing manual-row route, resolves receipt-vs-line shop fields and default inclusion/removal
+  semantics, documents the current nullable user-attribution boundary, adds declared SDK/image
+  dependencies, bounded upload/pixel validation, EXIF stripping, transient cleanup, SHA-256 upload
+  idempotency/duplicate detection, refusal/max-token/timeout/business validation, stale-processing
+  recovery, richer history data, and expanded security/idempotency tests. It now correctly requires
+  a small production migration for `receipts.content_sha256` and a ten-receipt model benchmark.
+  Planning only; no application code, dependency installation, DB migration, or deployment occurred.
+
+- 2026-07-01 — [Codex/GPT] — **Jamie decided receipt images must never be persistently saved.**
+  Updated `PHASE5_RECEIPT_OCR_PLAN.md`, `BACKEND_MIGRATION_PLAN.md`, `PHASE2_DATA_MODEL.md`, and
+  `UX_FLOWS.md`: image bytes are held only in bounded memory/secure temporary storage while being
+  validated, normalised, and extracted, then deleted on every success/failure path. SQLite retains
+  structured/corrected receipt data only; the legacy non-null `stored_path` field is empty for new
+  uploads. "View original photo" is browser-local for the current review session and disappears on
+  reload. No code, database, deployment, or production state changed. `git diff --check` passes.
 
 - 2026-06-30 — [Claude] — **Added a Web App Manifest + home-screen icons (`docs/manifest.json`, `docs/icons/*.png`, `docs/index.html` link tags), deployed.** Jamie asked whether Android had removed home-screen web shortcuts — it hadn't, but the app was missing a manifest, which is what gates Chrome's real "Install app" experience (standalone window, splash screen, icon) vs a plain bookmark. Generated a simple cart-silhouette icon via PIL (192/512px, regular + maskable variants for Android's adaptive-icon safe zone) since no image tooling/dependency was needed — used the system Python's existing Pillow install, not the project venv. Added `<link rel="manifest">`, `apple-touch-icon`, and a favicon. No JS touched. Committed, pushed, `git pull`ed on the VPS (no service restart needed — `docs/` is served straight off disk per request). **Verified the auth boundary applies consistently**: anonymous `curl /manifest.json` correctly 303s to `/login` (same as every other static asset, by design — not a bug), and an authenticated session gets 200 for the manifest and both icon files — proved this with a throwaway `verifytemp` account (hashed, added, tested, then removed and `.env` restored to exactly `jamie`+`anna`, service restarted clean, confirmed via `grep` afterward). Nothing further open here.
 

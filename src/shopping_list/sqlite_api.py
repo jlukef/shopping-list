@@ -53,6 +53,52 @@ def _shop_slug(name: str) -> str:
     return slug
 
 
+def ensure_catalog_item(
+    session: Session,
+    name: str,
+    *,
+    shop_id: str | None,
+    quantity: float,
+    unit: str,
+    increment_use: bool,
+) -> models.Item:
+    """Find-or-create the ``items`` catalog row for ``name``.
+
+    Shared canonicalisation used by both the legacy list actions here and the
+    receipt-accept flow in ``receipts_service.py`` — deliberately the same
+    exact-match-on-normalised-name logic in both places, not a second scheme.
+    """
+    canonical = _normalise_name(name)
+    item = session.exec(
+        select(models.Item).where(models.Item.canonical_name == canonical)
+    ).first()
+    ts = now_iso()
+    if item is None:
+        item = models.Item(
+            canonical_name=canonical,
+            display_name=name,
+            default_shop_id=shop_id,
+            default_quantity=quantity,
+            default_unit=unit or None,
+            use_count=1 if increment_use else 0,
+            last_used_at=ts if increment_use else None,
+            created_at=ts,
+            updated_at=ts,
+        )
+        session.add(item)
+        session.flush()
+    else:
+        item.display_name = name
+        item.default_shop_id = shop_id
+        item.default_quantity = quantity
+        item.default_unit = unit or None
+        if increment_use:
+            item.use_count += 1
+            item.last_used_at = ts
+        item.updated_at = ts
+    return item
+
+
 class SQLiteActionService:
     """Dispatch legacy API actions against one clean-start SQLite database."""
 
@@ -149,46 +195,6 @@ class SQLiteActionService:
             raise ValueError(f"Unknown shop: {resolved}")
         return resolved
 
-    @staticmethod
-    def _ensure_catalog_item(
-        session: Session,
-        name: str,
-        *,
-        shop_id: str | None,
-        quantity: float,
-        unit: str,
-        increment_use: bool,
-    ) -> models.Item:
-        canonical = _normalise_name(name)
-        item = session.exec(
-            select(models.Item).where(models.Item.canonical_name == canonical)
-        ).first()
-        ts = now_iso()
-        if item is None:
-            item = models.Item(
-                canonical_name=canonical,
-                display_name=name,
-                default_shop_id=shop_id,
-                default_quantity=quantity,
-                default_unit=unit or None,
-                use_count=1 if increment_use else 0,
-                last_used_at=ts if increment_use else None,
-                created_at=ts,
-                updated_at=ts,
-            )
-            session.add(item)
-            session.flush()
-        else:
-            item.display_name = name
-            item.default_shop_id = shop_id
-            item.default_quantity = quantity
-            item.default_unit = unit or None
-            if increment_use:
-                item.use_count += 1
-                item.last_used_at = ts
-            item.updated_at = ts
-        return item
-
     def _add_item(self, data: dict[str, Any]) -> dict[str, Any]:
         name = str(data.get("item") or "").strip()
         if not name:
@@ -198,7 +204,7 @@ class SQLiteActionService:
         ts = now_iso()
         with Session(self.engine) as session:
             shop_id = self._require_shop(session, data.get("shop"))
-            catalog = self._ensure_catalog_item(
+            catalog = ensure_catalog_item(
                 session,
                 name,
                 shop_id=shop_id,
@@ -312,7 +318,7 @@ class SQLiteActionService:
             if "sortOrder" in data:
                 row.sort_order = int(data.get("sortOrder") or 0)
 
-            catalog = self._ensure_catalog_item(
+            catalog = ensure_catalog_item(
                 session,
                 row.name,
                 shop_id=row.shop_id,

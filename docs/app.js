@@ -53,6 +53,14 @@ const STATE = {
   acSelected:         -1,
   acShop:             null,  // which shop's autocomplete is open
   loading:            false,
+  receipts:           [],    // receipt summaries for the Receipts tab
+  activeReceiptId:    null,  // receipt currently open in the review card, if any
+  activeReceiptData:  null,
+  activeReceiptFile:  null,  // the File last uploaded/retried — kept in memory only, for Retry
+  activeReceiptFileFor: null, // which receipt id activeReceiptFile belongs to
+  receiptPatchPromise: Promise.resolve(), // serialize shop/date edits before accept
+  receiptAiOptions:   [],    // [{alias,label,provider}] from /api/receipt-ai/options
+  receiptAiSelected:  'auto',
 };
 
 // ── Sortable instances (keyed so we can destroy on re-render) ─
@@ -1042,6 +1050,7 @@ function switchTab(tabId) {
   // Sortable can't measure elements that are inside display:none.
   // Re-init after the tab becomes visible so hit-detection works correctly.
   if (tabId === 'shop') requestAnimationFrame(() => initAllSortables());
+  if (tabId === 'receipts' && isHostedMode()) loadReceipts();
 }
 
 // Receipts tab — [Receipts | History] segmented control (client-side only).
@@ -1052,6 +1061,374 @@ function switchSegment(viewId) {
     s.setAttribute('aria-selected', on ? 'true' : 'false');
   });
   $$('.segmentView').forEach(v => v.classList.toggle('active', v.id === viewId));
+}
+
+// ════════════════════════════════════════════════════════════
+// Receipts — transient upload, multi-provider AI extraction, review, and accept.
+// The photo is sent only to the selected extraction provider during the request
+// and is never stored by this app — see PHASE5_RECEIPT_OCR_PLAN.md §5.
+// ════════════════════════════════════════════════════════════
+async function receiptFetch(path, options = {}) {
+  try {
+    const res = await fetch(path, options);
+    let json = null;
+    try { json = await res.json(); } catch (e) {}
+    if (!res.ok) {
+      toast((json && (json.error || json.detail)) || `Receipt error (HTTP ${res.status})`, 'error');
+      return null;
+    }
+    return json;
+  } catch (e) {
+    toast('Receipt request failed: ' + e.message, 'error');
+    return null;
+  }
+}
+
+function parsePenceInput(raw) {
+  const cleaned = String(raw || '').replace(/[^0-9.]/g, '');
+  if (!cleaned) return null;
+  const pounds = parseFloat(cleaned);
+  if (Number.isNaN(pounds)) return null;
+  return Math.round(pounds * 100);
+}
+
+function formatPence(pennies) {
+  if (pennies === null || pennies === undefined) return '';
+  return '£' + (pennies / 100).toFixed(2);
+}
+
+async function loadReceipts() {
+  const data = await receiptFetch('/api/receipts');
+  if (!data) return;
+  STATE.receipts = data.receipts || [];
+  renderReceiptsList();
+}
+
+async function loadReceiptAiOptions() {
+  const data = await receiptFetch('/api/receipt-ai/options');
+  STATE.receiptAiOptions = (data && data.options) || [];
+  renderReceiptAiSelects();
+}
+
+function renderReceiptAiSelects() {
+  const options = STATE.receiptAiOptions;
+  const optionsHtml = options.length
+    ? '<option value="auto">Read with: Automatic</option>' +
+      options.map(o => `<option value="${esc(o.alias)}">Read with: ${esc(o.label)}</option>`).join('')
+    : '';
+  ['receiptAiSelect', 'receiptAiSelect2'].forEach(id => {
+    const el = $(id);
+    if (!el) return;
+    el.innerHTML = optionsHtml;
+    el.value = STATE.receiptAiSelected;
+    el.classList.toggle('hidden', options.length === 0);
+  });
+  const retrySel = $('retryAiSelect');
+  if (retrySel) {
+    retrySel.innerHTML = optionsHtml;
+    retrySel.value = STATE.receiptAiSelected;
+  }
+}
+
+function setReceiptUploading(on) {
+  $('receiptProcessing').classList.toggle('hidden', !on);
+  [
+    'receiptTakePhotoBtn', 'receiptTakePhotoBtn2',
+    'receiptChooseFileBtn', 'receiptChooseFileBtn2',
+    'receiptAiSelect', 'receiptAiSelect2',
+  ].forEach(id => {
+    const el = $(id);
+    if (el) el.disabled = on;
+  });
+}
+
+function renderReceiptsList() {
+  const empty = $('receiptEmptyState');
+  const listWrap = $('receiptsListWrap');
+  const reviewWrap = $('receiptReviewWrap');
+  if (STATE.activeReceiptId) {
+    empty.classList.add('hidden');
+    listWrap.classList.add('hidden');
+    reviewWrap.classList.remove('hidden');
+    return;
+  }
+  reviewWrap.classList.add('hidden');
+  const hasReceipts = STATE.receipts.length > 0;
+  empty.classList.toggle('hidden', hasReceipts);
+  listWrap.classList.toggle('hidden', !hasReceipts);
+  if (!hasReceipts) return;
+
+  $('receiptsList').innerHTML = STATE.receipts.map(r => {
+    const shop = STATE.shops.find(s => s.id === r.shopId);
+    const shopLabel = shop ? `${shop.emoji} ${esc(shop.name)}` : 'No shop yet';
+    const dateLabel = esc(r.purchaseDate || 'No date yet');
+    const statusClass = r.status === 'saved' ? 'status-saved' : (r.status === 'failed' ? 'status-error' : 'status-ready');
+    const statusLabel = r.status === 'saved' ? 'Saved' : (r.status === 'failed' ? "Couldn't read this receipt" : 'Ready to review');
+    const totalLabel = r.totalPennies != null ? ' · ' + formatPence(r.totalPennies) : '';
+    return `
+      <li>
+        <button class="receiptListItem" type="button" onclick="openReceiptReview('${r.id}')">
+          <span class="receiptListItemMeta">
+            <span class="receiptListItemTitle">${shopLabel} · ${dateLabel}</span>
+            <span class="hint">${r.itemCount} item${r.itemCount === 1 ? '' : 's'}${totalLabel}</span>
+          </span>
+          <span class="statusChip ${statusClass}">${statusLabel}</span>
+        </button>
+      </li>`;
+  }).join('');
+}
+
+async function uploadReceiptFile(file) {
+  if (!file) return;
+  setReceiptUploading(true);
+  setLoading(true);
+  let data;
+  try {
+    const params = new URLSearchParams({ extractor: STATE.receiptAiSelected || 'auto' });
+    data = await receiptFetch(`/api/receipts?${params}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': file.type || 'application/octet-stream',
+        'X-Receipt-Filename': encodeURIComponent(file.name || ''),
+      },
+      body: file,
+    });
+  } finally {
+    setLoading(false);
+    setReceiptUploading(false);
+  }
+  if (!data) return;
+  STATE.activeReceiptFile = file;
+  STATE.activeReceiptFileFor = data.id;
+  await loadReceipts();
+  await openReceiptReview(data.id);
+}
+
+async function retryReceiptReview() {
+  if (!STATE.activeReceiptId || !STATE.activeReceiptFile) return;
+  const receiptId = STATE.activeReceiptId;
+  const includedCount = (STATE.activeReceiptData?.items || []).filter(i => i.accepted && !i.excluded).length;
+  if (includedCount > 0 && !confirm('Retrying will replace the current extracted items. Continue?')) return;
+  const alias = $('retryAiSelect').value || 'auto';
+  setReceiptUploading(true);
+  setLoading(true);
+  let data;
+  try {
+    const params = new URLSearchParams({ extractor: alias });
+    data = await receiptFetch(`/api/receipts/${receiptId}/retry?${params}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': STATE.activeReceiptFile.type || 'application/octet-stream',
+        'X-Receipt-Filename': encodeURIComponent(STATE.activeReceiptFile.name || ''),
+      },
+      body: STATE.activeReceiptFile,
+    });
+  } finally {
+    setLoading(false);
+    setReceiptUploading(false);
+  }
+  if (!data) return;
+  if (STATE.activeReceiptId !== receiptId) return;
+  STATE.activeReceiptData = data;
+  renderReceiptReview();
+}
+
+async function openReceiptReview(id) {
+  const data = await receiptFetch(`/api/receipts/${id}`);
+  if (!data) return;
+  // The in-memory File only ever belongs to the receipt it was just
+  // uploaded/retried for — opening a different receipt from the list must
+  // not offer to "retry" it with a stale, unrelated photo.
+  if (STATE.activeReceiptFileFor !== id) {
+    STATE.activeReceiptFile = null;
+    STATE.activeReceiptFileFor = null;
+  }
+  STATE.activeReceiptId = id;
+  STATE.activeReceiptData = data;
+  renderReceiptReview();
+  renderReceiptsList();
+}
+
+function closeReceiptReview() {
+  STATE.activeReceiptId = null;
+  STATE.activeReceiptData = null;
+  STATE.activeReceiptFile = null;
+  STATE.activeReceiptFileFor = null;
+  STATE.receiptPatchPromise = Promise.resolve();
+  renderReceiptsList();
+}
+
+function renderReceiptReview() {
+  const data = STATE.activeReceiptData;
+  if (!data) return;
+  const editable = ['ready', 'reviewed', 'failed'].includes(data.status);
+
+  const shopSel = $('reviewShopSelect');
+  shopSel.innerHTML = '<option value="">Choose shop…</option>' +
+    STATE.shops.map(s => `<option value="${s.id}"${s.id === data.shopId ? ' selected' : ''}>${s.emoji} ${esc(s.name)}</option>`).join('');
+  $('reviewDateInput').value = data.purchaseDate || '';
+  shopSel.disabled = !editable;
+  $('reviewDateInput').disabled = !editable;
+  $('reviewSavedNote').classList.toggle('hidden', editable);
+  $('reviewSavedNote').textContent = data.status === 'saved'
+    ? 'Saved to history · read only'
+    : `${data.status} · editing is temporarily unavailable`;
+  $('reviewNewItemRow').classList.toggle('hidden', !editable);
+  $('reviewAddRowBtn').classList.toggle('hidden', !editable);
+  $('reviewDiscardBtn').classList.toggle('hidden', !editable);
+  $('reviewSaveBtn').classList.toggle('hidden', !editable);
+
+  // Status chip — only shown for the "couldn't read this" branch; ready/reviewed/saved
+  // are already conveyed by the shop/date fields and footer being editable or not.
+  $('reviewStatusRow').classList.toggle('hidden', data.status !== 'failed');
+
+  // Retry — only offered while this browser tab still holds the photo that was
+  // just uploaded/retried for *this* receipt (images are never stored server-side).
+  const canRetry = STATE.receiptAiOptions.length > 0 && data.status !== 'saved';
+  const hasFile = STATE.activeReceiptFileFor === STATE.activeReceiptId && STATE.activeReceiptFile;
+  $('reviewRetryRow').classList.toggle('hidden', !(canRetry && hasFile));
+  $('reviewRetryHint').classList.toggle('hidden', !(canRetry && !hasFile && data.status === 'failed'));
+
+  const includedCount = data.items.filter(i => i.accepted && !i.excluded).length;
+  $('reviewCount').textContent = `${includedCount} item${includedCount === 1 ? '' : 's'}`;
+
+  const excludedCount = data.items.filter(i => i.excluded).length;
+  $('reviewExcludedNote').classList.toggle('hidden', excludedCount === 0);
+  if (excludedCount > 0) {
+    $('reviewExcludedNote').textContent =
+      `${excludedCount} line${excludedCount === 1 ? '' : 's'} hidden as offers / totals / points — tap to review`;
+  }
+
+  $('reviewRows').innerHTML = data.items.map(item => {
+    const excluded = item.excluded;
+    const priceLabel = item.lineTotalPennies != null ? formatPence(item.lineTotalPennies)
+      : (item.unitPricePennies != null ? formatPence(item.unitPricePennies) : '');
+    const qtyLabel = item.quantity ? ` × ${item.quantity}${item.unit ? ' ' + esc(item.unit) : ''}` : '';
+    const action = !editable ? '' : (excluded
+      ? `<button class="rowRestore" type="button" title="Restore" onclick="toggleReceiptItemExcluded('${item.id}', false)">↺</button>`
+      : `<button class="rowDel" type="button" title="Remove" onclick="toggleReceiptItemExcluded('${item.id}', true)">✕</button>`);
+    const fields = editable ? `
+        <input class="reviewInput grow" value="${esc(item.name || item.rawText)}" aria-label="Item name" onchange="saveReceiptItemField('${item.id}', 'name', this.value)">
+        <input class="reviewInput qty" inputmode="decimal" value="${item.quantity ?? 1}" aria-label="Quantity" onchange="saveReceiptItemField('${item.id}', 'quantity', this.value)">
+        <input class="reviewInput unit" value="${esc(item.unit || '')}" aria-label="Unit" onchange="saveReceiptItemField('${item.id}', 'unit', this.value)">
+        <input class="reviewInput price" inputmode="decimal" value="${priceLabel.replace('£', '')}" placeholder="£" aria-label="Price" onchange="saveReceiptItemField('${item.id}', 'lineTotalPennies', this.value)">`
+      : `<span class="reviewInput grow" style="background:none;border:none">${esc(item.name || item.rawText)}${qtyLabel}</span>
+        <span class="reviewInput price" style="background:none;border:none;text-align:right">${priceLabel}</span>`;
+    const confDot = item.confidence == null ? ''
+      : `<span class="confDot ${item.confidence >= 0.6 ? 'conf-ok' : 'conf-low'}" title="${item.confidence >= 0.6 ? 'High confidence' : 'Low confidence — check this'}"></span>`;
+    return `
+      <li class="reviewRow${excluded ? ' excluded' : ''}">
+        ${confDot}
+        ${fields}
+        ${action}
+      </li>`;
+  }).join('');
+}
+
+async function saveReceiptShopDate() {
+  if (!STATE.activeReceiptId || !STATE.activeReceiptData || STATE.activeReceiptData.status === 'saved') return null;
+  const receiptId = STATE.activeReceiptId;
+  const payload = {
+    shopId: $('reviewShopSelect').value || null,
+    purchaseDate: $('reviewDateInput').value || null,
+  };
+  const patch = async () => {
+    const data = await receiptFetch(`/api/receipts/${receiptId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (data && STATE.activeReceiptId === receiptId) STATE.activeReceiptData = data;
+    return data;
+  };
+  STATE.receiptPatchPromise = STATE.receiptPatchPromise.then(patch, patch);
+  return STATE.receiptPatchPromise;
+}
+
+async function saveReceiptItemField(itemId, field, rawValue) {
+  if (!STATE.activeReceiptId) return;
+  const receiptId = STATE.activeReceiptId;
+  let value = rawValue;
+  if (field === 'quantity') value = Number(rawValue);
+  if (field === 'lineTotalPennies') value = parsePenceInput(rawValue);
+  const patch = () => receiptFetch(`/api/receipts/${receiptId}/items/${itemId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ [field]: value }),
+    });
+  STATE.receiptPatchPromise = STATE.receiptPatchPromise.then(patch, patch);
+  const data = await STATE.receiptPatchPromise;
+  if (!data) {
+    renderReceiptReview(); // restore the last server-confirmed value after validation errors
+    return;
+  }
+  if (STATE.activeReceiptId === receiptId) {
+    STATE.activeReceiptData = data;
+  }
+}
+
+async function addReceiptReviewItem() {
+  if (!STATE.activeReceiptId) return;
+  const receiptId = STATE.activeReceiptId;
+  const nameInput = $('reviewNewItemName');
+  const name = nameInput.value.trim();
+  if (!name) { toast('Enter an item name', 'warn'); return; }
+  const quantity = parseFloat($('reviewNewItemQty').value) || 1;
+  const unit = $('reviewNewItemUnit').value.trim();
+  const lineTotalPennies = parsePenceInput($('reviewNewItemPrice').value);
+
+  const patch = () => receiptFetch(`/api/receipts/${receiptId}/items`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, quantity, unit, lineTotalPennies }),
+    });
+  STATE.receiptPatchPromise = STATE.receiptPatchPromise.then(patch, patch);
+  const data = await STATE.receiptPatchPromise;
+  if (!data) return;
+  if (STATE.activeReceiptId !== receiptId) return;
+  STATE.activeReceiptData = data;
+  renderReceiptReview();
+  nameInput.value = '';
+  $('reviewNewItemQty').value = '';
+  $('reviewNewItemUnit').value = '';
+  $('reviewNewItemPrice').value = '';
+  nameInput.focus();
+}
+
+async function toggleReceiptItemExcluded(itemId, excluded) {
+  if (!STATE.activeReceiptId) return;
+  const receiptId = STATE.activeReceiptId;
+  const patch = () => receiptFetch(`/api/receipts/${receiptId}/items/${itemId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ excluded }),
+    });
+  STATE.receiptPatchPromise = STATE.receiptPatchPromise.then(patch, patch);
+  const data = await STATE.receiptPatchPromise;
+  if (!data) return;
+  if (STATE.activeReceiptId !== receiptId) return;
+  STATE.activeReceiptData = data;
+  renderReceiptReview();
+}
+
+async function discardReceiptReview() {
+  if (!STATE.activeReceiptId) return;
+  await STATE.receiptPatchPromise;
+  const data = await receiptFetch(`/api/receipts/${STATE.activeReceiptId}`, { method: 'DELETE' });
+  if (!data) return;
+  toast('Receipt discarded', 'info');
+  closeReceiptReview();
+  loadReceipts();
+}
+
+async function acceptReceiptReview() {
+  if (!STATE.activeReceiptId) return;
+  if (!await saveReceiptShopDate()) return;
+  const data = await receiptFetch(`/api/receipts/${STATE.activeReceiptId}/accept`, { method: 'POST' });
+  if (!data) return;
+  toast(`Saved ${data.itemCount} item${data.itemCount === 1 ? '' : 's'} to history`, 'success');
+  closeReceiptReview();
+  loadReceipts();
 }
 
 // ════════════════════════════════════════════════════════════
@@ -1214,6 +1591,41 @@ function wire() {
   // Receipts tab segmented control
   $$('.segment').forEach(seg =>
     seg.addEventListener('click', () => switchSegment(seg.dataset.segment)));
+
+  // Receipts upload/review (hosted mode only — no backend for this in legacy static mode)
+  if (isHostedMode()) {
+    const cameraInput  = $('receiptCameraInput');
+    const libraryInput = $('receiptLibraryInput');
+    [$('receiptTakePhotoBtn'), $('receiptTakePhotoBtn2')].forEach(b => b && b.addEventListener('click', () => cameraInput.click()));
+    [$('receiptChooseFileBtn'), $('receiptChooseFileBtn2')].forEach(b => b && b.addEventListener('click', () => libraryInput.click()));
+    const onFilePicked = input => {
+      const file = input.files && input.files[0];
+      input.value = ''; // allow re-selecting the same file later
+      if (file) uploadReceiptFile(file);
+    };
+    cameraInput.addEventListener('change', () => onFilePicked(cameraInput));
+    libraryInput.addEventListener('change', () => onFilePicked(libraryInput));
+
+    $('reviewShopSelect').addEventListener('change', saveReceiptShopDate);
+    $('reviewDateInput').addEventListener('change', saveReceiptShopDate);
+    $('reviewBackBtn').addEventListener('click', async () => {
+      closeReceiptReview();
+      await loadReceipts();
+    });
+    $('reviewAddRowBtn').addEventListener('click', addReceiptReviewItem);
+    $('reviewDiscardBtn').addEventListener('click', discardReceiptReview);
+    $('reviewSaveBtn').addEventListener('click', acceptReceiptReview);
+    $('reviewRetryBtn').addEventListener('click', retryReceiptReview);
+
+    // "Read with" model picker — kept in sync across both upload locations and the retry row.
+    ['receiptAiSelect', 'receiptAiSelect2', 'retryAiSelect'].forEach(id => {
+      $(id).addEventListener('change', e => { STATE.receiptAiSelected = e.target.value; renderReceiptAiSelects(); });
+    });
+    loadReceiptAiOptions();
+  } else {
+    [$('receiptTakePhotoBtn'), $('receiptTakePhotoBtn2'), $('receiptChooseFileBtn'), $('receiptChooseFileBtn2')]
+      .forEach(b => { if (b) b.disabled = true; });
+  }
 
   // Suggestions strip (scaffold) — Hide just collapses it for now.
   const sugDismiss = $('suggestionsDismiss');

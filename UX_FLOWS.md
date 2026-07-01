@@ -116,7 +116,9 @@ anything reaches history. This is the single most important screen in the featur
 ### Layout (mobile-first, single column)
 
 - **Header:** shop + date, both editable; running item count; total (editable).
-- **"View original photo"** collapsible, so the user can cross-check against the paper receipt.
+- **"View original photo"** collapsible while the browser still holds the locally selected file,
+  so the user can cross-check during the current review session. The image is not retained by the
+  server and this affordance disappears after reload/navigation.
   On wide screens, show the photo pinned beside the list instead of collapsed.
 - **Line-item list.** Each row:
   - Editable **name** with the same autocomplete used elsewhere, so messy OCR text can snap to a
@@ -289,9 +291,9 @@ Most earlier questions are now decided (see top section). Still open:
 
 1. **Clear-bought copy/behaviour** — confirm clear-bought should archive to history (§5) rather than
    silently delete, once DB-backed.
-2. **Receipt image retention** — kept forever / deleted after extraction / configurable? (Open in the
-   plan; affects the "View original photo" affordance and the saved-receipt audit value. Claude
-   leans "kept, with an optional cleanup later" for audit, but this is Codex/Jamie's call.)
+2. **Receipt image retention — decided 2026-07-01:** never persist the image. The server processes
+   it transiently and deletes the bytes after extraction. "View original photo" is browser-local
+   during the current review session only; saved receipts retain structured data, not an audit image.
 3. **Per-item history entry point** — is long-press acceptable on mobile, or prefer an explicit "⋯"
    menu? (Claude leans explicit menu for discoverability.)
 

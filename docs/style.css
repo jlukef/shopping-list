@@ -640,6 +640,23 @@ body.hosted .legacyOnly { display: none; }
 .receiptUploadActions .actionBtn.secondary[disabled]:hover {
   background: transparent; color: var(--primary);
 }
+.receiptScaffold > .reviewInput { width: min(22rem, 100%); margin: 0 auto 10px; }
+.receiptProcessing {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin: 16px auto 0;
+  color: var(--primary);
+  font-size: .92rem;
+  font-weight: 600;
+}
+.receiptProcessing .spinner {
+  width: 18px;
+  height: 18px;
+  border-color: rgba(92, 78, 160, .22);
+  border-top-color: var(--primary);
+}
 
 /* Receipt lifecycle stepper: upload → review → save */
 .lifecycle {
@@ -781,6 +798,7 @@ body.hosted .legacyOnly { display: none; }
 }
 .reviewInput.grow  { flex: 1; min-width: 6rem; max-width: none; }
 .reviewInput.qty   { width: 46px; text-align: center; }
+.reviewInput.unit  { width: 54px; }
 .reviewInput.price { width: 64px; }
 
 .photoPanel {
@@ -813,6 +831,28 @@ body.hosted .legacyOnly { display: none; }
 .excludedNote { margin-top: 10px; font-style: italic; }
 .reviewFooter { display: flex; gap: 10px; margin-top: 14px; }
 .reviewFooter .actionBtn { flex: 1; }
+.receiptBackBtn {
+  border: none; background: none; color: var(--primary); font-weight: 600;
+  padding: 0 0 10px; font-size: .88rem;
+}
+.reviewRow.excluded { opacity: .5; }
+.reviewRow .rowRestore { flex: none; width: 28px; height: 28px; border: none; background: none; color: var(--primary); border-radius: var(--radius-sm); font-size: .9rem; }
+
+/* ── Live receipts list (Phase 5a) ─────────────────────────── */
+.receiptsList { display: flex; flex-direction: column; gap: 8px; margin-top: 14px; list-style: none; padding: 0; }
+.receiptListItem {
+  display: flex; align-items: center; gap: 10px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+  padding: 10px 12px;
+  text-align: left;
+  width: 100%;
+}
+.receiptListItemMeta { flex: 1; display: flex; flex-direction: column; gap: 2px; }
+.receiptListItemTitle { font-size: .9rem; font-weight: 600; color: var(--txt); }
+.status-saved { background: var(--green-lt); color: var(--green); }
 
 /* History trip-group skeleton */
 .tripCard {

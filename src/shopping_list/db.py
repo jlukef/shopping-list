@@ -54,6 +54,32 @@ def init_db(engine: Engine) -> None:
     SQLModel.metadata.create_all(engine)
 
 
+def _ensure_receipt_migrations(engine: Engine) -> None:
+    """Idempotently bring an existing ``receipts`` table up to date.
+
+    ``create_all`` only creates missing tables — it never alters an existing
+    one. Production already has a ``receipts`` table from before
+    ``content_sha256`` existed on the model, so add the column by hand here.
+    Safe to run on every startup: skipped once the column is present.
+    """
+    with engine.begin() as conn:
+        columns = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(receipts)").fetchall()}
+        if not columns:
+            return  # table doesn't exist yet; create_all() will have made it with the column already
+        if "content_sha256" not in columns:
+            conn.exec_driver_sql("ALTER TABLE receipts ADD COLUMN content_sha256 TEXT")
+        indexes = {row[1] for row in conn.exec_driver_sql("PRAGMA index_list(receipts)").fetchall()}
+        # Fresh schemas already get ix_receipts_content_sha256 from SQLModel.
+        # Existing schemas need it created after ALTER TABLE. Avoid maintaining
+        # two equivalent indexes under different names.
+        if "ix_receipts_content_sha256" not in indexes and "idx_receipts_content_sha256" not in indexes:
+            conn.exec_driver_sql(
+                "CREATE INDEX ix_receipts_content_sha256 ON receipts(content_sha256)"
+            )
+        elif "ix_receipts_content_sha256" in indexes and "idx_receipts_content_sha256" in indexes:
+            conn.exec_driver_sql("DROP INDEX idx_receipts_content_sha256")
+
+
 # Editable defaults for a brand-new database, chosen by Jamie on 2026-06-30.
 DEFAULT_SHOPS = [
     ("morrisons",       "Morrisons",          "🛒", "#007A33"),
@@ -199,6 +225,7 @@ def bootstrap(db_path: Path | str = DEFAULT_DB_PATH) -> Engine:
     """Create the DB file, schema and default shops in one call. Idempotent."""
     engine = get_engine(db_path)
     init_db(engine)
+    _ensure_receipt_migrations(engine)
     with Session(engine) as session:
         seed_default_shops(session)
         seed_default_layouts(session)

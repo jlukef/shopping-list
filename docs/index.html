@@ -136,22 +136,32 @@
       <button class="segment" data-segment="historyView" role="tab" aria-selected="false">History</button>
     </div>
 
-    <!-- Receipts segment — scaffold/copy only; upload is not wired up yet -->
+    <!-- Receipt capture, AI extraction, review, and accept flow. The image is
+         processed transiently and is never saved by the app. -->
     <div id="receiptsView" class="segmentView active" role="tabpanel">
-      <div class="receiptScaffold">
+      <input id="receiptCameraInput" type="file" accept="image/*" capture="environment" class="hidden" aria-hidden="true">
+      <input id="receiptLibraryInput" type="file" accept="image/*" class="hidden" aria-hidden="true">
+
+      <div id="receiptProcessing" class="receiptProcessing hidden" role="status" aria-live="polite">
+        <span class="spinner" aria-hidden="true"></span>
+        <span>Reading receipt with AI…</span>
+      </div>
+
+      <div id="receiptEmptyState" class="receiptScaffold">
         <div class="emptyIcon">🧾</div>
         <h3 class="scaffoldTitle">No receipts yet</h3>
         <p class="scaffoldLead">
-          Snap a photo of your shop receipt and we'll turn it into shopping history.
+          Snap a clear photo of your shop receipt. AI will read it, then you can
+          check and correct every row before saving.
         </p>
 
+        <select id="receiptAiSelect" class="reviewInput hidden" aria-label="Read receipt with"></select>
         <div class="receiptUploadActions">
-          <button class="actionBtn" disabled>📷 Take photo</button>
-          <button class="actionBtn secondary" disabled>🖼️ Choose from library</button>
+          <button id="receiptTakePhotoBtn" class="actionBtn" type="button">📷 Take photo</button>
+          <button id="receiptChooseFileBtn" class="actionBtn secondary" type="button">🖼️ Choose from library</button>
         </div>
-        <p class="hint comingSoon">Coming soon — uploading isn't wired up yet.</p>
 
-        <ol class="lifecycle" aria-label="How receipts will work">
+        <ol class="lifecycle" aria-label="How receipts work">
           <li class="lifecycleStep">
             <span class="lifecycleNum">1</span>
             <div><strong>Upload</strong><br>
@@ -160,7 +170,7 @@
           <li class="lifecycleStep">
             <span class="lifecycleNum">2</span>
             <div><strong>Review</strong><br>
-              <span class="hint">Check and fix the extracted items before anything is saved.</span></div>
+              <span class="hint">Check the AI's rows — the photo itself is never saved.</span></div>
           </li>
           <li class="lifecycleStep">
             <span class="lifecycleNum">3</span>
@@ -168,6 +178,58 @@
               <span class="hint">Accepted items become your shopping history.</span></div>
           </li>
         </ol>
+      </div>
+
+      <!-- Live receipt list — shown once at least one receipt exists. -->
+      <div id="receiptsListWrap" class="hidden">
+        <div class="receiptUploadActions" style="max-width:none; flex-direction:row;">
+          <button id="receiptTakePhotoBtn2" class="actionBtn" type="button">📷 Take photo</button>
+          <button id="receiptChooseFileBtn2" class="actionBtn secondary" type="button">🖼️ Choose from library</button>
+          <select id="receiptAiSelect2" class="reviewInput hidden" aria-label="Read receipt with"></select>
+        </div>
+        <ul id="receiptsList" class="receiptsList"></ul>
+      </div>
+
+      <!-- Live review card for the receipt currently being reviewed. -->
+      <div id="receiptReviewWrap" class="hidden">
+        <div class="reviewCard">
+          <button id="reviewBackBtn" class="receiptBackBtn" type="button">← Receipts</button>
+          <div class="reviewHead">
+            <div class="reviewHeadFields">
+              <select id="reviewShopSelect" class="reviewInput" aria-label="Shop"></select>
+              <input id="reviewDateInput" class="reviewInput" type="date" aria-label="Date">
+            </div>
+            <span id="reviewCount" class="reviewCount">0 items</span>
+          </div>
+
+          <div id="reviewStatusRow" class="statusLegend hidden">
+            <span id="reviewStatusChip" class="statusChip status-error">Couldn't read this receipt</span>
+          </div>
+
+          <ul id="reviewRows" class="reviewRows"></ul>
+
+          <p id="reviewExcludedNote" class="hint excludedNote hidden"></p>
+          <p id="reviewSavedNote" class="hint hidden">Saved to history · read only</p>
+
+          <div id="reviewRetryRow" class="reviewRow hidden" style="margin-top:10px">
+            <select id="retryAiSelect" class="reviewInput grow" aria-label="Retry with"></select>
+            <button id="reviewRetryBtn" class="actionBtn secondary" type="button">Retry</button>
+          </div>
+          <p id="reviewRetryHint" class="hint hidden">Take or choose the photo again to retry reading it.</p>
+
+          <div id="reviewNewItemRow" class="reviewRow" style="margin-top:10px">
+            <input id="reviewNewItemName" class="reviewInput grow" type="text" placeholder="Item name" aria-label="New item name">
+            <input id="reviewNewItemQty" class="reviewInput qty" type="text" placeholder="1" aria-label="New item quantity">
+            <input id="reviewNewItemUnit" class="reviewInput unit" type="text" placeholder="unit" aria-label="New item unit">
+            <input id="reviewNewItemPrice" class="reviewInput price" type="text" placeholder="£" aria-label="New item price">
+          </div>
+          <button id="reviewAddRowBtn" class="reviewAddRow" type="button">+ Add item</button>
+
+          <div class="reviewFooter">
+            <button id="reviewDiscardBtn" class="actionBtn secondary" type="button">Discard</button>
+            <button id="reviewSaveBtn" class="actionBtn" type="button">Save items to history</button>
+          </div>
+        </div>
       </div>
 
       <!-- Preview of the future review screen. Hidden by default behind a toggle so

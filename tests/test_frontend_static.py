@@ -54,5 +54,24 @@ class FrontendStaticTests(unittest.TestCase):
     def test_preview_toggle_updates_accessibility_state(self):
         self.assertIn("preview.setAttribute('aria-hidden', show ? 'false' : 'true');", self.js_content)
 
+    def test_receipt_review_has_back_readonly_and_edit_controls(self):
+        self.assertIn('id="reviewBackBtn"', self.html_content)
+        self.assertIn('id="reviewSavedNote"', self.html_content)
+        self.assertIn('id="reviewNewItemUnit"', self.html_content)
+        self.assertIn('aria-label="Item name"', self.js_content)
+        self.assertIn('aria-label="Quantity"', self.js_content)
+        self.assertIn('aria-label="Unit"', self.js_content)
+        self.assertIn('aria-label="Price"', self.js_content)
+
+    def test_receipt_mutations_are_serialized_before_accept(self):
+        self.assertIn('STATE.receiptPatchPromise = STATE.receiptPatchPromise.then(patch, patch);', self.js_content)
+        self.assertIn('if (!await saveReceiptShopDate()) return;', self.js_content)
+
+    def test_camera_capture_and_ai_progress_are_wired(self):
+        self.assertIn('id="receiptCameraInput" type="file" accept="image/*" capture="environment"', self.html_content)
+        self.assertIn('id="receiptProcessing"', self.html_content)
+        self.assertIn('function setReceiptUploading(on)', self.js_content)
+        self.assertIn('body: file', self.js_content)
+
 if __name__ == '__main__':
     unittest.main()
