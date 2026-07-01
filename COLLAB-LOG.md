@@ -10,6 +10,28 @@ Read this file and `BACKEND_MIGRATION_PLAN.md` before starting any assigned work
 
 Jamie can simply tell any model: **"See `COLLAB-LOG.md` for instructions."** The model should read this file and `BACKEND_MIGRATION_PLAN.md`, identify its own lane below, stay in that lane, avoid committing/pushing unless Jamie explicitly asks, and add a newest-first entry to this log when done.
 
+## 2026-07-01 — [Claude] Fixed receipts stranded in `processing` by cancelled uploads
+
+Review finding: `create_receipt`/`retry_receipt` commit the receipt as `processing`, then await the
+AI extraction (up to 60s for Gemini). If the client disconnected mid-request (phone lock, dropped
+mobile connection, navigating away), the server cancelled the handler task, the `CancelledError`
+skipped `_write_extraction_outcome`, and the receipt stayed `processing` — a state every
+edit/accept/retry route rejects — until the startup recovery sweep at the next restart/deploy.
+
+Fix in `receipts_service.py`: extraction now runs as a separate task held by a strong reference on
+the service (the event loop only weakly references tasks) and is awaited through `asyncio.shield`.
+A cancelled request no longer aborts the in-flight extraction; it completes and records its own
+success/failure, so the receipt is `ready`/`failed` when the user returns. Only the HTTP response is
+lost. Added a regression test that cancels an upload mid-extraction and proves the receipt still
+reaches `ready` with its items and a `success` attempt row.
+
+Full suite **154/154**; `compileall` and `node --check docs/app.js` clean. Committed as part of this
+entry; not deployed — production still runs `30e2198` without this fix until Jamie approves a deploy.
+
+Also flagged during the same review (not fixed here): production `.env` may still hold the older,
+invalid Gemini key — the corrected value in `GEMINI_API_KEY.md` was validated locally but no log
+entry records copying it to the server. Worth checking at the next deploy.
+
 ## 2026-07-01 — [Codex/GPT] Saved receipts and real History are editable/deletable
 
 Jamie requested full correction/deletion after saving. Implemented one linked source-of-truth model:

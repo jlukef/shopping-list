@@ -59,6 +59,10 @@ class ReceiptService:
     def __init__(self, engine: Engine, *, extractor_registry: ExtractorRegistry | None = None):
         self.engine = engine
         self._registry = extractor_registry or ExtractorRegistry(ReceiptAISettings())
+        # Strong references to shielded extraction tasks: the event loop only
+        # holds weak references, so a task orphaned by a cancelled request
+        # could otherwise be garbage-collected before writing its outcome.
+        self._inflight_extractions: set[asyncio.Task] = set()
         self._recover_stale_processing_receipts()
 
     def _recover_stale_processing_receipts(self) -> None:
@@ -157,6 +161,22 @@ class ReceiptService:
             return self._receipt_json(session, receipt)
 
     async def _run_extraction(self, receipt_id: int, jpeg_bytes: bytes, extractor_alias: str) -> None:
+        """Run the fallback chain to completion even if the request is cancelled.
+
+        The receipt is already committed as ``processing`` by the time this is
+        awaited. A client disconnect (phone lock, dropped mobile connection)
+        cancels the request handler at its next await — without shielding, that
+        cancellation would abort extraction before the outcome is written,
+        stranding the receipt in ``processing`` until the startup recovery
+        sweep. Shielding lets the in-flight extraction finish and record its
+        own success/failure; only the response is lost.
+        """
+        task = asyncio.ensure_future(self._extract_and_record(receipt_id, jpeg_bytes, extractor_alias))
+        self._inflight_extractions.add(task)
+        task.add_done_callback(self._inflight_extractions.discard)
+        await asyncio.shield(task)
+
+    async def _extract_and_record(self, receipt_id: int, jpeg_bytes: bytes, extractor_alias: str) -> None:
         """Runs the fallback chain and writes the outcome. Holds no DB session while awaiting network I/O."""
         try:
             result, attempts = await extract_with_fallback(

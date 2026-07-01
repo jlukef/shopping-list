@@ -453,6 +453,52 @@ class ReceiptExtractionIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(receipt["status"], "ready")
         self.assertEqual(receipt["items"], [])
 
+    async def test_cancelled_upload_does_not_strand_receipt_in_processing(self) -> None:
+        # A client disconnect (phone lock, dropped connection) cancels the
+        # request handler while it awaits extraction. The receipt was already
+        # committed as 'processing', so the shielded extraction must still run
+        # to completion and record its outcome — not leave the receipt stuck
+        # until the next service restart.
+        import asyncio
+
+        started = asyncio.Event()
+        release = asyncio.Event()
+
+        class _SlowExtractor(_StubExtractor):
+            async def extract(self, image_bytes, mime_type):
+                started.set()
+                await release.wait()
+                return await super().extract(image_bytes, mime_type)
+
+        registry = _fake_registry({"a": _SlowExtractor(GOOD_PAYLOAD_FOR_TESTS())})
+        service = self._service_with_registry(registry)
+
+        task = asyncio.create_task(service.create_receipt(_jpeg_bytes(), original_filename="r.jpg"))
+        await started.wait()
+        task.cancel()
+        with self.assertRaises(asyncio.CancelledError):
+            await task
+
+        release.set()
+        from sqlmodel import Session, select
+
+        from src.shopping_list import models
+
+        receipt = None
+        for _ in range(200):  # give the shielded background task time to finish
+            await asyncio.sleep(0.01)
+            with Session(service.engine) as session:
+                receipt = session.exec(select(models.Receipt)).first()
+                if receipt is not None and receipt.status != "processing":
+                    break
+        self.assertIsNotNone(receipt)
+        self.assertEqual(receipt.status, "ready")
+        with Session(service.engine) as session:
+            items = session.exec(select(models.ReceiptItem)).all()
+            attempts = session.exec(select(models.ReceiptExtractionAttempt)).all()
+        self.assertEqual(len(items), 1)
+        self.assertEqual([a.outcome for a in attempts], ["success"])
+
 
 def GOOD_PAYLOAD_FOR_TESTS() -> dict:
     return {
