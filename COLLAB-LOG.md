@@ -10,6 +10,24 @@ Read this file and `BACKEND_MIGRATION_PLAN.md` before starting any assigned work
 
 Jamie can simply tell any model: **"See `COLLAB-LOG.md` for instructions."** The model should read this file and `BACKEND_MIGRATION_PLAN.md`, identify its own lane below, stay in that lane, avoid committing/pushing unless Jamie explicitly asks, and add a newest-first entry to this log when done.
 
+## 2026-07-01 — [Codex/GPT] Firefox camera compatibility + corrected Gemini credential
+
+Jamie confirmed the deployed camera control worked in Chrome but did nothing in Firefox. Root cause
+was the browser-sensitive `button -> hiddenInput.click()` pattern combined with Firefox's uneven
+support for the non-Baseline `capture` hint. Replaced both camera/library launchers with transparent
+native file inputs covering the visible controls, so the user's tap lands directly on the browser's
+file input. Chrome can still honour `capture="environment"` and open the rear camera; Firefox can
+open its supported camera/photo chooser instead of relying on a scripted click. Both receipt-list
+states now own their own inputs, and upload locking disables the actual inputs. Added regression
+coverage proving two rear-camera inputs exist and the scripted `.click()` path is absent.
+
+Also confirmed `GEMINI_API_KEY.md` contained a newer value that did **not** match the `.env` value
+copied to production. Validated the newer file via Google's model-list API without displaying it.
+An end-to-end synthetic receipt extraction reached Gemini but exceeded the original 30-second
+allowance; gave only the Gemini adapter a 60-second timeout (Claude/GPT remain at 30 seconds), then
+retested successfully in 44 seconds with four structured lines. Full suite remains **138/138**;
+compile, frontend syntax, focused adapter/static tests, and diff checks are clean.
+
 ## 2026-07-01 — [Codex/GPT] Phase 5b deployed to `sharedlist.co.uk`
 
 Jamie explicitly approved deployment. Committed the reviewed 23-file Phase 5 set as `1407c12`

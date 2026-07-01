@@ -1132,9 +1132,19 @@ function renderReceiptAiSelects() {
 
 function setReceiptUploading(on) {
   $('receiptProcessing').classList.toggle('hidden', !on);
-  [
+  const buttonIds = [
     'receiptTakePhotoBtn', 'receiptTakePhotoBtn2',
     'receiptChooseFileBtn', 'receiptChooseFileBtn2',
+  ];
+  buttonIds.forEach(id => {
+    const el = $(id);
+    if (!el) return;
+    el.classList.toggle('disabled', on);
+    el.setAttribute('aria-disabled', String(on));
+  });
+  [
+    'receiptCameraInput', 'receiptCameraInput2',
+    'receiptLibraryInput', 'receiptLibraryInput2',
     'receiptAiSelect', 'receiptAiSelect2',
   ].forEach(id => {
     const el = $(id);
@@ -1594,17 +1604,18 @@ function wire() {
 
   // Receipts upload/review (hosted mode only — no backend for this in legacy static mode)
   if (isHostedMode()) {
-    const cameraInput  = $('receiptCameraInput');
-    const libraryInput = $('receiptLibraryInput');
-    [$('receiptTakePhotoBtn'), $('receiptTakePhotoBtn2')].forEach(b => b && b.addEventListener('click', () => cameraInput.click()));
-    [$('receiptChooseFileBtn'), $('receiptChooseFileBtn2')].forEach(b => b && b.addEventListener('click', () => libraryInput.click()));
     const onFilePicked = input => {
       const file = input.files && input.files[0];
       input.value = ''; // allow re-selecting the same file later
       if (file) uploadReceiptFile(file);
     };
-    cameraInput.addEventListener('change', () => onFilePicked(cameraInput));
-    libraryInput.addEventListener('change', () => onFilePicked(libraryInput));
+    [
+      'receiptCameraInput', 'receiptCameraInput2',
+      'receiptLibraryInput', 'receiptLibraryInput2',
+    ].forEach(id => {
+      const input = $(id);
+      input.addEventListener('change', () => onFilePicked(input));
+    });
 
     $('reviewShopSelect').addEventListener('change', saveReceiptShopDate);
     $('reviewDateInput').addEventListener('change', saveReceiptShopDate);
@@ -1623,8 +1634,10 @@ function wire() {
     });
     loadReceiptAiOptions();
   } else {
-    [$('receiptTakePhotoBtn'), $('receiptTakePhotoBtn2'), $('receiptChooseFileBtn'), $('receiptChooseFileBtn2')]
-      .forEach(b => { if (b) b.disabled = true; });
+    [
+      'receiptCameraInput', 'receiptCameraInput2',
+      'receiptLibraryInput', 'receiptLibraryInput2',
+    ].forEach(id => { $(id).disabled = true; });
   }
 
   // Suggestions strip (scaffold) — Hide just collapses it for now.

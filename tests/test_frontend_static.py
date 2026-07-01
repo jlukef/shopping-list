@@ -68,9 +68,11 @@ class FrontendStaticTests(unittest.TestCase):
         self.assertIn('if (!await saveReceiptShopDate()) return;', self.js_content)
 
     def test_camera_capture_and_ai_progress_are_wired(self):
-        self.assertIn('id="receiptCameraInput" type="file" accept="image/*" capture="environment"', self.html_content)
+        self.assertIn('id="receiptCameraInput" class="receiptFileInput" type="file" accept="image/*" capture="environment"', self.html_content)
+        self.assertIn('id="receiptCameraInput2" class="receiptFileInput" type="file" accept="image/*" capture="environment"', self.html_content)
         self.assertIn('id="receiptProcessing"', self.html_content)
         self.assertIn('function setReceiptUploading(on)', self.js_content)
+        self.assertNotIn("cameraInput.click()", self.js_content)
         self.assertIn('body: file', self.js_content)
 
 if __name__ == '__main__':

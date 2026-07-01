@@ -139,9 +139,6 @@
     <!-- Receipt capture, AI extraction, review, and accept flow. The image is
          processed transiently and is never saved by the app. -->
     <div id="receiptsView" class="segmentView active" role="tabpanel">
-      <input id="receiptCameraInput" type="file" accept="image/*" capture="environment" class="hidden" aria-hidden="true">
-      <input id="receiptLibraryInput" type="file" accept="image/*" class="hidden" aria-hidden="true">
-
       <div id="receiptProcessing" class="receiptProcessing hidden" role="status" aria-live="polite">
         <span class="spinner" aria-hidden="true"></span>
         <span>Reading receipt with AI…</span>
@@ -157,8 +154,14 @@
 
         <select id="receiptAiSelect" class="reviewInput hidden" aria-label="Read receipt with"></select>
         <div class="receiptUploadActions">
-          <button id="receiptTakePhotoBtn" class="actionBtn" type="button">📷 Take photo</button>
-          <button id="receiptChooseFileBtn" class="actionBtn secondary" type="button">🖼️ Choose from library</button>
+          <label id="receiptTakePhotoBtn" class="actionBtn receiptFileButton">
+            📷 Take photo
+            <input id="receiptCameraInput" class="receiptFileInput" type="file" accept="image/*" capture="environment" aria-label="Take a receipt photo">
+          </label>
+          <label id="receiptChooseFileBtn" class="actionBtn secondary receiptFileButton">
+            🖼️ Choose from library
+            <input id="receiptLibraryInput" class="receiptFileInput" type="file" accept="image/*" aria-label="Choose a receipt image">
+          </label>
         </div>
 
         <ol class="lifecycle" aria-label="How receipts work">
@@ -183,8 +186,14 @@
       <!-- Live receipt list — shown once at least one receipt exists. -->
       <div id="receiptsListWrap" class="hidden">
         <div class="receiptUploadActions" style="max-width:none; flex-direction:row;">
-          <button id="receiptTakePhotoBtn2" class="actionBtn" type="button">📷 Take photo</button>
-          <button id="receiptChooseFileBtn2" class="actionBtn secondary" type="button">🖼️ Choose from library</button>
+          <label id="receiptTakePhotoBtn2" class="actionBtn receiptFileButton">
+            📷 Take photo
+            <input id="receiptCameraInput2" class="receiptFileInput" type="file" accept="image/*" capture="environment" aria-label="Take another receipt photo">
+          </label>
+          <label id="receiptChooseFileBtn2" class="actionBtn secondary receiptFileButton">
+            🖼️ Choose from library
+            <input id="receiptLibraryInput2" class="receiptFileInput" type="file" accept="image/*" aria-label="Choose another receipt image">
+          </label>
           <select id="receiptAiSelect2" class="reviewInput hidden" aria-label="Read receipt with"></select>
         </div>
         <ul id="receiptsList" class="receiptsList"></ul>

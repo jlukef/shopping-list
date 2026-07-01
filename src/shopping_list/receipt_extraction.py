@@ -26,6 +26,7 @@ SUPPORTED_CURRENCIES = ("GBP", "USD", "EUR")
 MAX_LINES = 200
 MAX_RAW_TEXT_LENGTH = 300
 EXTRACTION_TIMEOUT_SECONDS = 30.0
+GEMINI_TIMEOUT_SECONDS = 60.0
 
 PROVIDER_LABELS = {"anthropic": "Claude", "google": "Gemini", "openai": "GPT"}
 
@@ -308,7 +309,10 @@ class GeminiExtractor:
 
         client = genai.Client(
             api_key=self._api_key,
-            http_options=genai_types.HttpOptions(timeout=int(EXTRACTION_TIMEOUT_SECONDS * 1000)),
+            # Gemini's structured image interaction is consistently slower than
+            # the other two adapters. Keep its allowance separate so Claude/GPT
+            # failures still fall through quickly in automatic mode.
+            http_options=genai_types.HttpOptions(timeout=int(GEMINI_TIMEOUT_SECONDS * 1000)),
         )
         image_b64 = base64.standard_b64encode(image_bytes).decode("ascii")
         try:
