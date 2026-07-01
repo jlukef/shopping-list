@@ -420,13 +420,13 @@
         <section class="settingSection">
           <h3>Store Layout Editor</h3>
           <p class="hint">
-            Define aisle order for a shop — one department per line, keywords comma-separated.
-            Format: <code>Dept Name | kw1, kw2, kw3</code>
+            Drag departments ⠿ into the order you walk the store. Keywords
+            (comma-separated) decide which items sort into each department.
           </p>
           <select id="layoutShopSelect" class="fullInput"></select>
-          <textarea id="layoutEditor" class="layoutEditor" placeholder="Fresh Produce | fruit, veg, tomato, onion&#10;Bakery | bread, rolls, loaf&#10;…"></textarea>
+          <ul id="layoutRows" class="layoutRows"></ul>
           <div class="btnRow">
-            <button id="loadLayoutBtn"  class="pill">Load</button>
+            <button id="addLayoutRowBtn" class="pill">+ Add department</button>
             <button id="saveLayoutBtn"  class="pill primary">Save layout</button>
           </div>
         </section>

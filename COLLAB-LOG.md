@@ -10,6 +10,27 @@ Read this file and `BACKEND_MIGRATION_PLAN.md` before starting any assigned work
 
 Jamie can simply tell any model: **"See `COLLAB-LOG.md` for instructions."** The model should read this file and `BACKEND_MIGRATION_PLAN.md`, identify its own lane below, stay in that lane, avoid committing/pushing unless Jamie explicitly asks, and add a newest-first entry to this log when done.
 
+## 2026-07-02 — [Claude] Researched Morrisons/Aldi/Lidl layouts + drag-to-reorder layout editor
+
+Jamie asked for researched layouts for Aldi/Morrisons (Wetherby) and Lidl (Knaresborough), and a
+draggable layout screen. Branch-specific aisle plans are not published anywhere findable, so the
+seeds are detailed *generic* UK walk orders from current retailer/trade sources: Aldi's nationally
+consistent format (produce at the entrance per Project Fresh, Specialbuys mid-store, 17 departments),
+Lidl's current concept (bakery by the door, meat/fish at the very back, alcohol at the back, freezer
+at the end of the journey, 17 departments), and Morrisons' produce-into-Market-Street flow with full
+grocery aisles (23 departments). Keyword coverage expanded substantially for the aisle sort.
+
+The Settings layout editor is no longer a `Name | keywords` textarea: it renders one draggable row
+per department (⠿ handle via the existing SortableJS, name + keywords inputs, per-row remove,
+"+ Add department"). The DOM is the source of truth so typing isn't lost on drag; picking a shop
+auto-loads (always refetching), and Save persists DOM order via the unchanged `saveLayout` action.
+Legacy static mode uses the same editor unchanged.
+
+Verified: suite **165/165** (seed tests are content-generic), compile/`node --check` clean.
+Browser-verified on a scratch server: Aldi loads 17 rows in the researched order, moved
+"Middle Aisle Specialbuys" to the top via the drag path, saved, re-fetched from the server in the
+new order. Deployment notes in the entry above/below as applicable.
+
 ## 2026-07-02 — [Claude] Cleared receipt/product test data from production
 
 Jamie asked for a completely clean database ahead of real use of the new features. After a

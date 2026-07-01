@@ -1227,20 +1227,32 @@ body.hosted .legacyOnly { display: none; }
 .colorInput { width: 40px; height: 40px; border: none; border-radius: var(--radius-sm); padding: 2px; cursor: pointer; }
 
 /* ── Layout editor ───────────────────────────────────────── */
-.layoutEditor {
-  width: 100%;
-  min-height: 200px;
+.layoutRows { list-style: none; margin: 8px 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.layoutRow {
+  display: flex; align-items: center; gap: 8px;
   border: 1.5px solid var(--border);
   border-radius: var(--radius-sm);
-  padding: 10px 12px;
   background: var(--surface2);
-  font-size: .85rem;
-  font-family: 'Menlo', 'Consolas', monospace;
-  resize: vertical;
-  line-height: 1.6;
+  padding: 6px 8px;
+}
+.layoutRow.sortable-ghost { opacity: .4; }
+.layoutDragHandle {
+  flex: none; cursor: grab; touch-action: none;
+  color: var(--txt2); font-size: 1rem; padding: 6px 4px;
+  user-select: none;
+}
+.layoutFields { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.layoutName, .layoutKeywords {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 6px 8px;
+  background: var(--surface);
   outline: none;
 }
-.layoutEditor:focus { border-color: var(--primary); background: #fff; }
+.layoutName { font-weight: 600; font-size: .88rem; }
+.layoutKeywords { font-size: .78rem; color: var(--txt2); }
+.layoutName:focus, .layoutKeywords:focus { border-color: var(--primary); }
 
 /* ── Sort shop picker ────────────────────────────────────── */
 .shopPickList { display: flex; flex-direction: column; gap: 6px; }
@@ -1465,7 +1477,8 @@ body.hosted .legacyOnly { display: none; }
   .modalBody { padding: 20px 24px; gap: 22px; }
 
   /* ── Layout editor taller on desktop ────────────────────── */
-  .layoutEditor { min-height: 260px; }
+  .layoutFields { flex-direction: row; }
+  .layoutFields .layoutName { flex: 0 0 38%; }
 }
 
 /* ════════════════════════════════════════════════════════════

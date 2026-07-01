@@ -999,28 +999,68 @@ async function runSetup() {
 }
 
 // ── Layout editor ─────────────────────────────────────────────
+// Draggable department rows. The DOM is the source of truth for names,
+// keywords and order; renders only happen on load/add/remove/drag so
+// in-progress typing is never thrown away.
 async function loadLayout() {
   const shopId = $('layoutShopSelect').value;
-  if (!shopId) return;
-  if (!STATE.layouts[shopId]) await loadLayouts(shopId);
-  const layouts = STATE.layouts[shopId] || [];
-  $('layoutEditor').value = layouts
-    .sort((a, b) => Number(a.order) - Number(b.order))
-    .map(l => `${l.department} | ${l.keywords}`)
-    .join('\n');
+  if (!shopId) { $('layoutRows').innerHTML = ''; return; }
+  await loadLayouts(shopId); // always refetch — another device may have edited
+  const layouts = (STATE.layouts[shopId] || [])
+    .slice()
+    .sort((a, b) => Number(a.order) - Number(b.order));
+  renderLayoutRows(layouts.map(l => ({ name: l.department, keywords: l.keywords || '' })));
+}
+
+function readLayoutRowsFromDom() {
+  return [...$('layoutRows').children].map(li => ({
+    name: li.querySelector('.layoutName').value,
+    keywords: li.querySelector('.layoutKeywords').value,
+  }));
+}
+
+function renderLayoutRows(rows) {
+  $('layoutRows').innerHTML = rows.map((d, i) => `
+    <li class="layoutRow">
+      <span class="layoutDragHandle" title="Drag to reorder">⠿</span>
+      <span class="layoutFields">
+        <input class="layoutName" value="${esc(d.name)}" placeholder="Department" aria-label="Department name">
+        <input class="layoutKeywords" value="${esc(d.keywords)}" placeholder="keywords, comma, separated" aria-label="Department keywords">
+      </span>
+      <button class="rowDel" type="button" title="Remove department" onclick="removeLayoutRow(${i})">✕</button>
+    </li>`).join('');
+  if (SORTABLES.layoutEditor) SORTABLES.layoutEditor.destroy();
+  SORTABLES.layoutEditor = new Sortable($('layoutRows'), {
+    handle: '.layoutDragHandle',
+    animation: 150,
+    onEnd: () => renderLayoutRows(readLayoutRowsFromDom()),
+  });
+}
+
+function addLayoutRow() {
+  const rows = readLayoutRowsFromDom();
+  rows.push({ name: '', keywords: '' });
+  renderLayoutRows(rows);
+  const items = $('layoutRows').children;
+  items[items.length - 1].querySelector('.layoutName').focus();
+}
+
+function removeLayoutRow(idx) {
+  const rows = readLayoutRowsFromDom();
+  rows.splice(idx, 1);
+  renderLayoutRows(rows);
 }
 
 async function saveLayout() {
   const shopId = $('layoutShopSelect').value;
-  if (!shopId) return;
-  const lines = $('layoutEditor').value.split('\n').filter(l => l.trim());
-  const departments = lines.map((line, i) => {
-    const [name, kw] = line.split('|').map(s => s.trim());
-    return { name: name || `Section ${i+1}`, order: i + 1, keywords: kw || '' };
-  });
+  if (!shopId) { toast('Choose a shop first', 'warn'); return; }
+  const departments = readLayoutRowsFromDom()
+    .filter(d => d.name.trim())
+    .map((d, i) => ({ name: d.name.trim(), order: i + 1, keywords: d.keywords.trim() }));
+  if (!departments.length) { toast('Add at least one department', 'warn'); return; }
   const res = await api('saveLayout', { shop: shopId, departments });
   if (res) {
-    STATE.layouts[shopId] = departments.map(d => ({ shop: shopId, ...d }));
+    STATE.layouts[shopId] = departments.map(d => ({ shop: shopId, department: d.name, ...d }));
     toast(`Layout saved for ${shopId} ✓`, 'success');
   }
 }
@@ -1964,7 +2004,8 @@ function wire() {
   $('runSetupBtn').addEventListener('click', runSetup);
   $('saveSettingsBtn').addEventListener('click', saveSettings);
   $('addShopBtn').addEventListener('click', addShop);
-  $('loadLayoutBtn').addEventListener('click', loadLayout);
+  $('layoutShopSelect').addEventListener('change', loadLayout);
+  $('addLayoutRowBtn').addEventListener('click', addLayoutRow);
   $('saveLayoutBtn').addEventListener('click', saveLayout);
 
   // Sort modal
