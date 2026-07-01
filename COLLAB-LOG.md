@@ -10,6 +10,25 @@ Read this file and `BACKEND_MIGRATION_PLAN.md` before starting any assigned work
 
 Jamie can simply tell any model: **"See `COLLAB-LOG.md` for instructions."** The model should read this file and `BACKEND_MIGRATION_PLAN.md`, identify its own lane below, stay in that lane, avoid committing/pushing unless Jamie explicitly asks, and add a newest-first entry to this log when done.
 
+## 2026-07-02 — [Claude] Deployed `26dab38` to production (products screen, price fixes, cancellation shield)
+
+Jamie approved. Pre-flight: production worktree clean (only prior untracked `.env` backups), on
+`30e2198`, service active. Confirmed via SHA-256 fingerprints (values never displayed) that the
+production Gemini key already matches the corrected local value — the `.env.pre-firefox-gemini-648ccc9`
+backup shows Codex fixed it during the 648ccc9 deploy, closing the open question from 2026-07-01.
+No new dependencies (`requirements.txt` unchanged since 1407c12) and no `.env` changes needed.
+
+Took timestamped backups (`.env.pre-products-26dab38`, transactionally consistent
+`data/shopping_list.sqlite.pre-products-26dab38`), pulled `--ff-only` `30e2198..26dab38` (three
+commits: cancellation shield, price recording/derivation + computed trip totals, products screen
+with merge), restarted only `shopping-list.service`.
+
+Post-deploy verification: service active, `/healthz` 200 locally and via `https://sharedlist.co.uk`,
+unauthenticated `/api/products` and `/api/history` return 401 (public too), root redirects to login,
+journal clean. Production data intact: 3 receipts / 2 trips / 21 trip items / 42 items / 0 aliases
+(the change from the previously logged 3/3/33 predates this deploy — Jamie's own usage; the
+pre-deploy backup preserves it regardless). No production rows were mutated during verification.
+
 ## 2026-07-02 — [Claude] Products screen with merge (start of Phase 6a product identity)
 
 Jamie asked for a products screen: every product with name/prices/purchase count, the ability to
