@@ -10,6 +10,22 @@ Read this file and `BACKEND_MIGRATION_PLAN.md` before starting any assigned work
 
 Jamie can simply tell any model: **"See `COLLAB-LOG.md` for instructions."** The model should read this file and `BACKEND_MIGRATION_PLAN.md`, identify its own lane below, stay in that lane, avoid committing/pushing unless Jamie explicitly asks, and add a newest-first entry to this log when done.
 
+## 2026-07-05 — [Claude] Read Tesco Clubcard prices from receipts + deployed 2ceca29
+
+Jamie's Tesco receipt (`LongTescos.jpg`) prints Clubcard pricing as an indented line under the
+product (`Cc £7.85` / `Cc 69p`) with the saving as a negative amount; the un-discounted shelf price
+sits on the product line itself. The extractor was taking the shelf price. Added a
+LOYALTY / MEMBER PRICING section to `EXTRACTION_PROMPT` in `src/shopping_list/receipt_extraction.py`:
+use the `Cc` amount as `unit_price_pennies`, ignore the shelf price and `£x.xx each` line, treat
+`69p` as 69 pennies, and do **not** re-emit the saving as a separate discount row (avoids
+double-counting against the total). Receipt-level Subtotal/Savings/Total rows still returned as printed.
+
+Also raised the Anthropic/OpenAI output cap 4096 → 8192 tokens so long receipts (this one has ~65
+multi-line items) aren't truncated mid-JSON.
+
+Deployed `2ceca29`: `--ff-only` pull on `/srv/shopping-list`, restarted `shopping-list.service`,
+`/healthz` returned `{"ok":true}`, service active. Prompt-only change, no dependency or schema change.
+
 ## 2026-07-02 — [Claude] Researched Morrisons/Aldi/Lidl layouts + drag-to-reorder layout editor
 
 Jamie asked for researched layouts for Aldi/Morrisons (Wetherby) and Lidl (Knaresborough), and a
