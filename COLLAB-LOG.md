@@ -10,6 +10,28 @@ Read this file and `BACKEND_MIGRATION_PLAN.md` before starting any assigned work
 
 Jamie can simply tell any model: **"See `COLLAB-LOG.md` for instructions."** The model should read this file and `BACKEND_MIGRATION_PLAN.md`, identify its own lane below, stay in that lane, avoid committing/pushing unless Jamie explicitly asks, and add a newest-first entry to this log when done.
 
+## 2026-07-05 — [Claude] Expanded receipt-AI model picker + auto now leads with Opus 4.8
+
+The Clubcard receipt still came back as hallucinated word-salad ("Tesco Jacks Hummus Green Tea 20",
+"Tesco Bottle Chicken Breast") because all three configured extraction models were the budget tier
+(Haiku 4.5, Gemini 3.5 Flash, GPT-5.4-mini) and `auto` tried Haiku first — which "succeeds" badly and
+never falls through. Widened `SHOPPING_LIST_RECEIPT_AI_OPTIONS` in the VPS `.env` (`/srv/shopping-list`)
+to add higher-capability tiers and pointed `auto` at the strongest model.
+
+New options (alias → provider:model): `claude-opus`→anthropic:claude-opus-4-8,
+`claude-sonnet`→anthropic:claude-sonnet-5, `claude-opus-47`→anthropic:claude-opus-4-7,
+`claude-fast`→anthropic:claude-haiku-4-5, `gpt`→openai:gpt-5.4, `gpt-mini`→openai:gpt-5.4-mini,
+`gemini-pro`→google:gemini-3.5-pro, `gemini-fast`→google:gemini-3.5-flash.
+`_FALLBACKS` reordered so `auto` runs Opus 4.8 → Sonnet 5 → Opus 4.7 → GPT-5.4 → Gemini Pro → the three
+budget models as last resort. `_DEFAULT` stays `auto`.
+
+Caveat: the Anthropic IDs are confirmed; the two new non-Anthropic IDs (`gemini-3.5-pro`, `gpt-5.4`) are
+inferred from the existing flash/mini naming and unverified — if wrong they're dead dropdown entries only
+(auto leads with Opus, config parse doesn't validate model IDs). Fable 5 deliberately not added (its
+30-day-retention requirement 400s every request under ZDR orgs). Backed up `.env` first, validated the
+new config parses via `load_settings()` (8 enabled options) before restarting `shopping-list.service`;
+`/healthz` `{"ok":true}`, service active. Config-only change — nothing in git.
+
 ## 2026-07-05 — [Claude] Read Tesco Clubcard prices from receipts + deployed 2ceca29
 
 Jamie's Tesco receipt (`LongTescos.jpg`) prints Clubcard pricing as an indented line under the
