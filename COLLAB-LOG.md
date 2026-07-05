@@ -10,6 +10,35 @@ Read this file and `BACKEND_MIGRATION_PLAN.md` before starting any assigned work
 
 Jamie can simply tell any model: **"See `COLLAB-LOG.md` for instructions."** The model should read this file and `BACKEND_MIGRATION_PLAN.md`, identify its own lane below, stay in that lane, avoid committing/pushing unless Jamie explicitly asks, and add a newest-first entry to this log when done.
 
+## 2026-07-05 — [Claude] Fixed negative-money receipt failure + credit/model-ID incident (deployed 5a6a505)
+
+Investigating two `LongTescos.jpg` receipts stuck in `processing` (0 items, "editing temporarily
+unavailable"). Root cause chain, all found by inspecting the prod SQLite + `receipt_extraction_attempts`:
+
+1. **Anthropic account ran out of API credit** — every Anthropic model returned 400 "credit balance too
+low" (confirmed directly). During exhaustion on the big image the calls *timed out* (~90s each = 30s
+timeout x 3 SDK retries), so `auto` leading with 3 dead Anthropic models ground for ~4.5 min before
+falling through. Fallback DID work: receipt 7 extracted via `gpt-5.4` (56 items). Jamie later topped up.
+2. **Bad model ID I'd added**: `gemini-3.5-pro` is a 404 — the Gemini pro line tops out at 3.1. Fixed the
+`.env` option to `gemini-3.1-pro-preview` (verified present + Google has credit). `gpt-5.4` verified valid.
+   OpenAI + Google both had credit throughout; only Anthropic was dry.
+3. Recovered the two stuck receipts via service restart (startup `_recover_stale_processing_receipts`
+   flips `processing`→`failed`). Receipt 7 had already completed to `ready` via GPT.
+
+**One-shot Opus 4.8 cost measurement** (Jamie asked): a single scan of this 65-item receipt = 3,020 input
++ 6,531 output tokens = **~$0.178 (~£0.14)**. Output tokens dominate.
+
+That run also exposed a **real bug in my earlier Clubcard prompt (2ceca29)**: it told the model to return
+the printed Savings summary row "as printed" — negative on Tesco (−£44.56). Opus emitted
+`line_total_pennies=-4456`; `as_optional_money` rejects negatives, so `validate_extraction_payload` raised
+`ExtractionInvalid` and **discarded the whole 65-line extraction**. Fix in `receipt_extraction.py`:
+- Prompt now states money is always a NON-NEGATIVE magnitude; a discount/saving/loyalty reduction is a
+  positive number with `category=discount` (dropped the "as printed" wording).
+- New `_lenient_money` for per-line `unit_price`/`line_total`: an unreadable/out-of-range value nulls that
+  one field instead of failing the whole receipt. Receipt-level subtotal/total stay strict.
+`--ff-only` pull, verified `_lenient_money(-4456)→None`, restarted service, `/healthz` `{"ok":true}`, active.
+Not re-run against the image to save API spend — offered a ~£0.14 verification run.
+
 ## 2026-07-05 — [Claude] Expanded receipt-AI model picker + auto now leads with Opus 4.8
 
 The Clubcard receipt still came back as hallucinated word-salad ("Tesco Jacks Hummus Green Tea 20",
