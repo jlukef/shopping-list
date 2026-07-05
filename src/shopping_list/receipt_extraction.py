@@ -95,6 +95,17 @@ EXTRACTION_PROMPT = (
     "- Do not merge weighted products, differing variants, differing unit prices, or rows separated "
     "by evidence that they are distinct purchases. For weights, quantity is the measured amount "
     "and unit is kg/g/L/ml as printed.\n\n"
+    "LOYALTY / MEMBER PRICING (e.g. Tesco Clubcard):\n"
+    "- Some receipts print a shelf price on the product line, then the loyalty price on the next "
+    "indented line, such as `Cc £7.85` or `Cc 69p`, usually with the saving as a negative amount "
+    "(for example `-£1.90`) on the same line. The `Cc` amount is the price per unit actually paid.\n"
+    "- When a product has such a loyalty-price line, use the loyalty price as `unit_price_pennies` "
+    "and set `line_total_pennies` to quantity x loyalty price. Ignore the higher shelf price and "
+    "any `£x.xx each` shelf line. `69p` means 69 pennies.\n"
+    "- Do not return the loyalty line or its negative saving as a separate discount row — it is "
+    "already reflected in the item price. Append the loyalty line's text to the item's raw_text, "
+    "joined with ` | `.\n"
+    "- Receipt-level summary rows (Subtotal, Savings, Total) should still be returned as printed.\n\n"
     "MONEY AND CERTAINTY:\n"
     "- All money fields are integer pennies: £1.45 is 145. `unit_price_pennies` is for one item or "
     "stated measurement unit; `line_total_pennies` is the amount charged for the whole row.\n"
@@ -366,7 +377,7 @@ class AnthropicExtractor:
         try:
             response = await client.messages.create(
                 model=self.model,
-                max_tokens=4096,
+                max_tokens=8192,
                 output_config={"format": {"type": "json_schema", "schema": RECEIPT_JSON_SCHEMA}},
                 messages=[{
                     "role": "user",
@@ -464,7 +475,7 @@ class OpenAIExtractor:
         try:
             response = await client.chat.completions.create(
                 model=self.model,
-                max_completion_tokens=4096,
+                max_completion_tokens=8192,
                 response_format={
                     "type": "json_schema",
                     "json_schema": {
